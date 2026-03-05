@@ -1,0 +1,4 @@
+[1/2] Building C object CMakeFiles/RayLib_Game.dir/main.c.obj
+FAILED: CMakeFiles/RayLib_Game.dir/main.c.obj 
+C:\Users\Zorglub\AppData\Local\Programs\CLion\bin\mingw\bin\gcc.exe -DGRAPHICS_API_OPENGL_33 -DPLATFORM_DESKTOP -DPROJECT_DIR=\"C:/Users/Zorglub/CLionProjects/raylib-chess\" -IC:/Users/Zorglub/CLionProjects/raylib-chess/include -IC:/Users/Zorglub/CLionProjects/raylib-chess/cmake-build-debug/_deps/raylib-src/src -g -std=gnu17 -fdiagnostics-color=always -MD -MT CMakeFiles/RayLib_Game.dir/main.c.obj -MF CMakeFiles\RayLib_Game.dir\main.c.obj.d -o CMakeFiles/RayLib_Game.dir/main.c.obj -c C:/Users/Zorglub/CLionProjects/raylib-chess/main.c
+ninja: build stopped: subcommand failed.
