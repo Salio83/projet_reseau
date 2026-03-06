@@ -1,40 +1,63 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
-/* Inclusions fictives basées sur la structure du projet */
-// #include "../network_models/packet_types.h" 
-// #include "../ipc_utils/message_queue.h"
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
-/* Fonctions définies dans connection.c */
-extern int init_tcp_server();
-extern int init_udp_server();
-extern void handle_connections(int tcp_socket, int udp_socket);
+#define PORT 8080
+#define MAX_CLIENTS 100
 
 int main() {
-    printf("Démarrage du Gateway (Routeur TCP/UDP) - Serveur World Polytech Chess...\n");
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
 
-    // 1. Initialisation de l'IPC (Files de messages)
-    // Utile pour envoyer les requêtes au Matchmaker de manière asynchrone
-    // afin de ne pas bloquer le serveur si 1000 joueurs se connectent[cite: 37, 38].
-    // init_ipc_queues(); 
-
-    // 2. Initialisation des sockets réseaux
-    int tcp_socket = init_tcp_server();
-    int udp_socket = init_udp_server();
-
-    if (tcp_socket < 0 || udp_socket < 0) {
-        fprintf(stderr, "Erreur lors de l'initialisation des sockets.\n");
-        return EXIT_FAILURE;
+    // 1. Création de la socket
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
     }
 
-    printf("Gateway en écoute sur les ports TCP et UDP...\n");
+    // 2. Attachement au port 8080
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
 
-    // 3. Boucle principale de gestion des clients
-    // Cette fonction va écouter les joueurs (TCP) et les spectateurs (UDP)[cite: 2, 3, 4].
-    handle_connections(tcp_socket, udp_socket);
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
 
-    // 4. Nettoyage
-    close(tcp_socket);
-    close(udp_socket);
-    return EXIT_SUCCESS;
+    // 3. Ecoute
+    if (listen(server_fd, 3) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Gateway World Polytech Chess en ligne sur le port %d\n", PORT);
+    printf("En attente de connexions...\n");
+
+    while(1) {
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            perror("accept");
+            continue;
+        }
+        
+        printf("Nouveau client connecté ! (IP: %s)\n", inet_ntoa(address.sin_addr));
+        
+        // Pour l'instant, on ferme juste la connexion après avoir dit bonjour
+        char *hello = "Bienvenue sur World Polytech Chess Server!\n";
+        send(new_socket, hello, strlen(hello), 0);
+        close(new_socket);
+    }
+
+    return 0;
 }

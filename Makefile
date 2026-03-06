@@ -11,11 +11,18 @@ CHESS_SRCS = apps/chess_standalone/main.c common/chess_engine/chess.c common/ren
 # Cibles principales
 all: services
 
+# Compilation et lancement du Gateway
+gateway: services/gateway/main.c
+	@echo "Compilation du Gateway..."
+	$(CC) $(CFLAGS) services/gateway/main.c -o gateway
+	@echo "Lancement du serveur..."
+	./gateway
+
 # Compilation et lancement du jeu d'échecs standalone
 chess: $(CHESS_SRCS)
-	@echo "🔨 Compilation du mode Chess Standalone..."
+	@echo "Compilation du mode Chess Standalone..."
 	$(CC) $(CFLAGS) $(CHESS_SRCS) $(RAYLIB_LIBS) -o chess_game
-	@echo "🚀 Lancement du jeu..."
+	@echo "Lancement du jeu..."
 	./chess_game
 
 # Placeholder pour les futurs services backend
