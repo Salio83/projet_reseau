@@ -24,7 +24,7 @@ static bool is_square_attacked(GameState* game, int row, int col, PlayerColor by
 
 static bool is_piece_pinned(GameState* game, int row, int col, int to_row, int to_col) {
     Piece piece = game->board[row][col];
-    if (piece.color == PIECE_NONE) return false;
+    if (piece.type == PIECE_NONE) return false;
 
     Piece captured = game->board[to_row][to_col];
     
