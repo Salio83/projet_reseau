@@ -1,29 +1,37 @@
-CC := gcc
-CFLAGS := -Wall -Wextra -O2
-LDFLAGS :=
+# Configuration du compilateur
+CC = gcc
+CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -DPROJECT_DIR=\"$(shell pwd)\"
 
-SRCS_CLIENT := client.c
-SRCS_SERVER := server.c
-BIN_CLIENT := client
-BIN_SERVER := server
+# Bibliothèques pour Raylib (GUI)
+RAYLIB_LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 
-.PHONY: all client server chess clean
+# Chemins des sources
+CHESS_SRCS = apps/chess_standalone/main.c common/chess_engine/chess.c common/render/render.c
 
-all: client server
+# Cibles principales
+all: services
 
-client: $(SRCS_CLIENT)
-	$(CC) $(CFLAGS) -o $(BIN_CLIENT) $(SRCS_CLIENT) $(LDFLAGS)
+# Compilation et lancement du Gateway
+gateway: services/gateway/main.c
+	@echo "Compilation du Gateway..."
+	$(CC) $(CFLAGS) services/gateway/main.c -o gateway
+	@echo "Lancement du serveur..."
+	./gateway
 
-server: $(SRCS_SERVER)
-	$(CC) $(CFLAGS) -o $(BIN_SERVER) $(SRCS_SERVER) $(LDFLAGS)
+# Compilation et lancement du jeu d'échecs standalone
+chess: $(CHESS_SRCS)
+	@echo "Compilation du mode Chess Standalone..."
+	$(CC) $(CFLAGS) $(CHESS_SRCS) $(RAYLIB_LIBS) -o chess_game
+	@echo "Lancement du jeu..."
+	./chess_game
 
-chess:
-	@if [ -f raylib-chess/CMakeLists.txt ]; then \
-		mkdir -p raylib-chess/build && cd raylib-chess/build && cmake .. && $(MAKE); \
-	else \
-		echo "raylib-chess CMakeLists.txt not found."; \
-	fi
+# Placeholder pour les futurs services backend
+services:
+	@echo "A venir : Compilation des services (gateway, auth, matchmaker...)"
 
+# Nettoyage
 clean:
-	rm -f $(BIN_CLIENT) $(BIN_SERVER)
-	@if [ -d raylib-chess/build ]; then cd raylib-chess/build && $(MAKE) clean || true; fi
+	rm -f chess_game
+	rm -rf build/
+
+.PHONY: all chess services clean
