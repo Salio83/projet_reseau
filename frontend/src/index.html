@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Chess Online</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <nav class="sidebar">
+      <div class="nav-item active" data-target="home-section">Accueil</div>
+      <div class="nav-item" data-target="game-section">Jouer</div>
+      <div class="nav-item" data-target="social-section">Social</div>
+      <div class="nav-item" data-target="tournament-section">Tournois</div>
+    </nav>
+
+    <main class="content">
+      <!-- Section Accueil -->
+      <section id="home-section" class="view-section active">
+        <h1>Bienvenue sur Chess Online</h1>
+        <div class="menu-cards">
+          <div class="card" onclick="switchView('game-section')">
+            <h2>Partie Solo</h2>
+            <p>Entraînez-vous contre l'ordinateur.</p>
+            <button class="btn">Lancer</button>
+          </div>
+          <div class="card" onclick="switchView('game-section')">
+            <h2>Partie en Ligne</h2>
+            <p>Affrontez des joueurs du monde entier.</p>
+            <button class="btn">Rechercher</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section Jeu -->
+      <section id="game-section" class="view-section">
+        <div class="game-layout">
+          <div id="board" class="board"></div>
+          <div id="info" class="game-info">
+            <h3>Partie en cours</h3>
+            <div id="status">Chargement...</div>
+            <div id="move-history"></div>
+            <button class="btn danger" onclick="switchView('home-section')">Quitter</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section Social -->
+      <section id="social-section" class="view-section">
+        <h1>Social</h1>
+        <div class="social-container">
+          <div class="chat-panel">
+            <h3>Messagerie</h3>
+            <div class="chat-messages" id="chat-messages">
+              <div class="msg">Système: Bienvenue dans le chat global !</div>
+            </div>
+            <div class="chat-input">
+              <input type="text" placeholder="Votre message...">
+              <button class="btn">Envoyer</button>
+            </div>
+          </div>
+          <div class="observation-panel">
+            <h3>Observer des parties</h3>
+            <ul class="game-list">
+              <li>GrandMaître vs DeepBlue (En cours) <button class="btn small">Rejoindre</button></li>
+              <li>User123 vs ChessMaster (En cours) <button class="btn small">Rejoindre</button></li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section Tournois -->
+      <section id="tournament-section" class="view-section">
+        <h1>Tournois</h1>
+        <div class="tournament-list">
+          <div class="card tournament-card">
+            <h3>Blitz du Samedi</h3>
+            <p>Format: 3+2 | Joueurs: 24/64</p>
+            <button class="btn">S'inscrire</button>
+          </div>
+          <div class="card tournament-card">
+            <h3>Coupe des Masters</h3>
+            <p>Format: 10+5 | Joueurs: 12/32</p>
+            <button class="btn">S'inscrire</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

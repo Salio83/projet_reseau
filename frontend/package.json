@@ -1,0 +1,12 @@
+{
+  "name": "chess-frontend",
+  "version": "1.0.0",
+  "description": "Frontend Electron pour le jeu d'échecs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^34.5.8"
+  }
+}
