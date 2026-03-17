@@ -1,22 +1,27 @@
 # Configuration du compilateur
 CC = gcc
-CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -DPROJECT_DIR=\"$(shell pwd)\"
+CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -DPROJECT_DIR=\"$(shell pwd)\"
 
-# Bibliothèques pour Raylib (GUI)
+# Bibliothèques
 RAYLIB_LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+SERVER_LIBS = -lpthread
 
 # Chemins des sources
 CHESS_SRCS = apps/chess_standalone/main.c common/chess_engine/chess.c common/render/render.c
+SERVER_SRCS = services/server_main.c services/gateway/gateway.c common/ipc_utils/ipc_utils.c
 
 # Cibles principales
-all: services
+all: server chess
 
-# Compilation et lancement du Gateway
-gateway: services/gateway/main.c
-	@echo "Compilation du Gateway..."
-	$(CC) $(CFLAGS) services/gateway/main.c -o gateway
-	@echo "Lancement du serveur..."
-	./gateway
+# Compilation du Serveur Unifié
+server: $(SERVER_SRCS)
+	@echo "Compilation du Serveur Unifié..."
+	$(CC) $(CFLAGS) $(SERVER_SRCS) $(SERVER_LIBS) -o server_app
+	@echo "Serveur prêt : ./server_app"
+
+# Lancement du Gateway (alias vers le serveur unifié pour compatibilité)
+gateway: server
+	./server_app
 
 # Compilation et lancement du jeu d'échecs standalone
 chess: $(CHESS_SRCS)
@@ -25,13 +30,9 @@ chess: $(CHESS_SRCS)
 	@echo "Lancement du jeu..."
 	./chess_game
 
-# Placeholder pour les futurs services backend
-services:
-	@echo "A venir : Compilation des services (gateway, auth, matchmaker...)"
-
 # Nettoyage
 clean:
-	rm -f chess_game
+	rm -f chess_game server_app gateway
 	rm -rf build/
 
-.PHONY: all chess services clean
+.PHONY: all chess server gateway clean
