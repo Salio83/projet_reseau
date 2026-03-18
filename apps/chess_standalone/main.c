@@ -1,12 +1,127 @@
 #include "raylib.h"
 #include "chess.h"
 #include "render.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+
+#define TCP_PORT 8080
 
 typedef enum {
     STATE_MENU,
     STATE_PLAYING,
     STATE_GAME_OVER
 } GameScreenState;
+
+/*
+ * On fait un serveru TCP pour écouter les requêtes .
+ * On ouvre un socket ipv4 en mode pas bloquand, et on écoute le port 8080 pour le moment
+ */
+int init_tcp_server(int port) {
+    int server_fd;
+    struct sockaddr_in address;
+
+    // Création du socket TCP
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("Échec de la création du socket");
+        return -1;
+    }
+
+    //on peut réutiliser le port juste après la fermeture
+    int opt = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt a échoué");
+    }
+
+    // NONBLOCK
+    int flags = fcntl(server_fd, F_GETFL, 0);
+    fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
+
+    // Préparation du serv
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port); // On passe le port en format réseau
+
+    // Link le socket à l'adresse et au port
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("Échec du bind");
+        return -1;
+    }
+
+    // On commence à écouter
+    if (listen(server_fd, 3) < 0) {
+        perror("Échec de l'écoute");
+        return -1;
+    }
+
+    return server_fd;
+}
+
+
+/*
+ * Chaque frame on va voir les connexions
+ * Si on a une connexion, on va voir ce qu'elle nous envoie
+ * on traduit le message et on tente de faire le coup
+ */
+void process_tcp_clients(int server_fd, GameState* game) {
+    if (server_fd < 0) return;
+    
+    struct sockaddr_in address;
+    socklen_t addrlen = sizeof(address);
+    // Tente d'accepter une nouvelle connexion. Non bloquant grâce à fcntl plus haut.
+    int new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+    
+    // S'il y a un client connecté
+    if (new_socket >= 0) {
+        // Petit timeout pas trop long pour la lecture
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 50000;
+        setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
+        char buffer[1024] = {0};
+        // Lecture du message recu
+        int valread = read(new_socket, buffer, sizeof(buffer) - 1);
+        
+        if (valread >= 4) {
+            char from_file = buffer[0]; // Colonne de départ
+            char from_rank = buffer[1]; // Rangée de départ
+            char to_file   = buffer[2]; // Colonne d'arrivée 
+            char to_rank   = buffer[3]; // Rangée d'arrivée
+
+            // Vérification
+            if (from_file >= 'a' && from_file <= 'h' &&
+                from_rank >= '1' && from_rank <= '8' &&
+                to_file >= 'a' && to_file <= 'h' &&
+                to_rank >= '1' && to_rank <= '8') {
+                
+                int from_col = from_file - 'a';
+                int from_row = 8 - (from_rank - '0');
+                int to_col   = to_file - 'a';
+                int to_row   = 8 - (to_rank - '0');
+                
+                // Logging au cas ou on a des problèmes
+                printf("Serveur TCP : Coup reçu %c%c%c%c (de %d,%d vers %d,%d)\n", 
+                       from_file, from_rank, to_file, to_rank, 
+                       from_row, from_col, to_row, to_col);
+                
+                // On passe le coup au moteur.Pour l'instant on vérifie pas si il est valide ou pas
+                // le jeu s'en occupe mais ne donne pas de feedback
+                if (game_make_move(game, from_row, from_col, to_row, to_col)) {
+                    printf("Serveur TCP : Coup appliqué avec succès !\n");
+                } else {
+                    printf("Serveur TCP : Coup invalide !\n");
+                }
+            }
+        }
+        // Fermeture de la connexion après avoir traité la requête
+        close(new_socket);
+    }
+}
 
 int main(void)
 {
@@ -27,6 +142,8 @@ int main(void)
     int board_y = 50;
     int square_size = 80;
 
+    int tcp_server_fd = init_tcp_server(TCP_PORT);
+
     while (!WindowShouldClose())
     {
         BeginDrawing();
@@ -45,6 +162,12 @@ int main(void)
         }
         else if (screen_state == STATE_PLAYING) {
             ClearBackground((Color){50, 50, 50, 255});
+
+            process_tcp_clients(tcp_server_fd, game);
+
+            if (game->checkmate || game->stalemate) {
+                screen_state = STATE_GAME_OVER;
+            }
 
             render_board(game, board_x, board_y, square_size, &textures);
             render_ui_info(game, screenWidth, screenHeight);
