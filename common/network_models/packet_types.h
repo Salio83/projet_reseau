@@ -13,9 +13,24 @@ typedef enum {
     PACKET_PLAYER_MOVE = 3,
     PACKET_CHAT_MSG = 4,
 
+    // Réponses / Notifications (Serveur -> Joueurs)
+    PACKET_GAME_STARTED = 10,
+    PACKET_MOVE_ERROR = 11,
+
     // Mises à jour UDP (Serveur -> Spectateurs)
     PACKET_GAME_STATE_UDP = 50
 } PacketType;
+
+// ... (rest of header remains)
+
+// Notification de début de partie
+typedef struct {
+    uint32_t game_id;
+    uint32_t opponent_id;
+    uint8_t your_color; // 0 for White, 1 for Black
+} GameStarted;
+
+// ... (rest of file)
 
 //Header
 typedef struct {
@@ -60,6 +75,7 @@ typedef struct {
     char fen_board[90];  
     uint32_t white_time_ms; 
     uint32_t black_time_ms; 
+    uint8_t current_turn; // 0 for White, 1 for Black
 } GameStateUDP;
 
 

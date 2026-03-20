@@ -1,6 +1,10 @@
-//
-// Created by hugo on 20/03/2026.
-//
+/**
+ * @file serveur.c
+ * @brief Version simplifiée (test) d'un serveur TCP.
+ * 
+ * Ce fichier est un exemple de base pour tester la connectivité TCP.
+ * Pour la logique réelle du projet, voir les fichiers dans le dossier 'services/'.
+ */
 #include <stdio.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
