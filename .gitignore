@@ -10,12 +10,32 @@ build/
 *.o
 *.a
 *.so
+*.d
+*.out
+*.exe
+
+# Specific project binaries
+server_app
+auth_app
+matchmaker_app
+gameworker_app
+client_interactive
+test_client
+test_suite
+test_game_flow
+chess_game
+gateway
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.filters
 
 # OS
 .DS_Store
@@ -37,3 +57,4 @@ __pycache__/
 # Temporary files
 *.tmp
 *.temp
+*~
