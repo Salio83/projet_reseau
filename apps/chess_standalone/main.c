@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define TCP_PORT 8080
+#define TCP_PORT 25565
 
 typedef enum {
     STATE_MENU,
