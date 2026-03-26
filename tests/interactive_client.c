@@ -8,7 +8,7 @@
 #include "../common/network_models/packet_types.h"
 
 #define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 8080
+#define SERVER_PORT 6767
 
 int sock = 0;
 int running = 1;

@@ -16,7 +16,7 @@
 #include "../../common/ipc_utils/ipc_utils.h"
 #include "../../common/ipc_utils/ipc_keys.h"
 
-#define PORT 8080
+#define PORT 6767
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 2048
 
@@ -128,6 +128,7 @@ void start_gateway() {
 
     printf("Gateway en ligne sur le port %d\n", PORT);
 
+    // ---  Boucle principale ---
     while(1) {
         FD_ZERO(&readfds);
         FD_SET(server_fd, &readfds);

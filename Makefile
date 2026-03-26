@@ -36,6 +36,11 @@ gameworker_service: $(GAMEWORKER_SRCS)
 	@echo "Compilation du Service GameWorker..."
 	$(CC) $(CFLAGS) $(GAMEWORKER_SRCS) -o gameworker_app
 
+# Compilation du jeu d'échecs (Standalone)
+chess: $(CHESS_SRCS)
+	@echo "Compilation du jeu d'échecs..."
+	$(CC) $(CFLAGS) $(CHESS_SRCS) $(RAYLIB_LIBS) -o chess_game
+
 # Client interactif pour les tests manuels
 client_interactive: tests/interactive_client.c
 	@echo "Compilation du client interactif..."
