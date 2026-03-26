@@ -81,22 +81,24 @@ void board_to_simple_string(GameState* state, char* buffer) {
 int main() {
     printf("[GameWorker] Démarrage...\n");
 
-    // Connexion aux files de messages : Entrée (gameworker) et Sortie (gateway)
-    int gameworker_mq = ipc_msg_get(ipc_get_key(GAMEWORKER_MSG_QUEUE_PATH, GAMEWORKER_MSG_QUEUE_ID));
-    int gateway_mq = ipc_msg_get(ipc_get_key(GATEWAY_MSG_QUEUE_PATH, GATEWAY_MSG_QUEUE_ID));
+    // Connexion à la file de messages globale
+    int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+    if (global_mq == -1) {
+        perror("ipc_msg_get failed");
+        exit(1);
+    }
 
     for (int i = 0; i < MAX_GAMES; i++) games[i].active = false;
 
     char msg_buffer[MAX_MSG_SIZE];
 
-    // Boucle infinie d'écoute des messages IPC
+    // Boucle infinie d'écoute des messages IPC (MSG_TYPE_GAMEWORKER)
     while (1) {
-        // Lecture bloquante des messages envoyés par le Gateway ou le Matchmaker
-        int nbytes = ipc_msg_receive(gameworker_mq, msg_buffer, MAX_MSG_SIZE, 1);
+        int nbytes = ipc_msg_receive(global_mq, msg_buffer, MAX_MSG_SIZE, MSG_TYPE_GAMEWORKER);
         if (nbytes > 0) {
             PacketHeader* header = (PacketHeader*)msg_buffer;
 
-            // CAS 1 : Notification de début de partie (provient du Matchmaker)
+            // CAS 1 : Notification de début de partie (provient du Matchmaker via la file globale)
             if (header->type == PACKET_GAME_STARTED) {
                 GameStarted* gs = (GameStarted*)(msg_buffer + sizeof(PacketHeader));
                 printf("[GameWorker] Création de la partie %d\n", gs->game_id);
@@ -129,7 +131,7 @@ int main() {
                         printf("[GameWorker] Erreur: Joueur %d tente de jouer alors que c'est le tour de %d\n", header->client_id, current_player_id);
                         
                         PacketHeader err_h = {PACKET_MOVE_ERROR, sizeof(PacketHeader), header->client_id};
-                        ipc_msg_send(gateway_mq, &err_h, sizeof(err_h), 1);
+                        ipc_msg_send(global_mq, &err_h, sizeof(err_h), MSG_TYPE_GATEWAY);
                         continue;
                     }
 
@@ -154,16 +156,16 @@ int main() {
 
                         // Envoi de la mise à jour au joueur Blanc
                         out_h->client_id = games[g_idx].player_white;
-                        ipc_msg_send(gateway_mq, out_buf, out_h->length, 1);
+                        ipc_msg_send(global_mq, out_buf, out_h->length, MSG_TYPE_GATEWAY);
 
                         // Envoi de la mise à jour au joueur Noir
                         out_h->client_id = games[g_idx].player_black;
-                        ipc_msg_send(gateway_mq, out_buf, out_h->length, 1);
+                        ipc_msg_send(global_mq, out_buf, out_h->length, MSG_TYPE_GATEWAY);
                     } else {
                         // Échec : Le coup est illégal selon les règles des échecs
                         printf("[GameWorker] Game %d: Coup invalide de %d\n", move->game_id, header->client_id);
                         PacketHeader err_h = {PACKET_MOVE_ERROR, sizeof(PacketHeader), header->client_id};
-                        ipc_msg_send(gateway_mq, &err_h, sizeof(err_h), 1);
+                        ipc_msg_send(global_mq, &err_h, sizeof(err_h), MSG_TYPE_GATEWAY);
                     }
                 }
             }

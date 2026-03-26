@@ -58,6 +58,16 @@ int ipc_msg_send(int msqid, const void *msg, size_t size, long type);
 int ipc_msg_receive(int msqid, void *msg, size_t size, long type);
 
 /**
+ * @brief Récupère un message d'une file de manière non-bloquante.
+ * @param msqid ID de la file de messages.
+ * @param msg Buffer de destination.
+ * @param size Taille max du buffer.
+ * @param type Type de message à lire (0 pour le prochain disponible).
+ * @return Nombre d'octets lus ou -1 en cas d'erreur (errno == ENOMSG si pas de message).
+ */
+int ipc_msg_receive_nowait(int msqid, void *msg, size_t size, long type);
+
+/**
  * @brief Supprime définitivement une file de messages du système.
  */
 int ipc_msg_delete(int msqid);

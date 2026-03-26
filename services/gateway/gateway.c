@@ -20,56 +20,47 @@
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 2048
 
-// Identifiants des files de messages vers les services internes
-int auth_mq, matchmaking_mq, gameworker_mq, chat_mq, gateway_mq;
+// Identifiant unique pour la file de messages globale
+int global_mq;
 
 /**
- * @brief Prépare l'environnement IPC en créant les fichiers nécessaires et en récupérant les files.
+ * @brief Prépare l'environnement IPC en créant le fichier nécessaire et en récupérant la file.
  */
 void setup_ipc() {
-    // Création préventive des fichiers pour ftok s'ils n'existent pas sur le disque
-    const char* paths[] = {AUTH_MSG_QUEUE_PATH, MATCHMAKING_MSG_QUEUE_PATH, GAMEWORKER_MSG_QUEUE_PATH, CHAT_MSG_QUEUE_PATH, GATEWAY_MSG_QUEUE_PATH};
-    for(int i=0; i<5; i++) {
-        int fd = open(paths[i], O_CREAT | O_RDWR, 0666);
-        if (fd != -1) close(fd);
-    }
+    // Création préventive du fichier pour ftok s'il n'existe pas sur le disque
+    int fd = open(GLOBAL_MSG_QUEUE_PATH, O_CREAT | O_RDWR, 0666);
+    if (fd != -1) close(fd);
 
-    // Récupération des IDs de files pour chaque service
-    auth_mq = ipc_msg_get(ipc_get_key(AUTH_MSG_QUEUE_PATH, AUTH_MSG_QUEUE_ID));
-    matchmaking_mq = ipc_msg_get(ipc_get_key(MATCHMAKING_MSG_QUEUE_PATH, MATCHMAKING_MSG_QUEUE_ID));
-    gameworker_mq = ipc_msg_get(ipc_get_key(GAMEWORKER_MSG_QUEUE_PATH, GAMEWORKER_MSG_QUEUE_ID));
-    chat_mq = ipc_msg_get(ipc_get_key(CHAT_MSG_QUEUE_PATH, CHAT_MSG_QUEUE_ID));
-    gateway_mq = ipc_msg_get(ipc_get_key(GATEWAY_MSG_QUEUE_PATH, GATEWAY_MSG_QUEUE_ID));
+    // Récupération de l'ID de la file globale
+    global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
 }
 
 /**
- * @brief Analyse un paquet réseau et l'envoie vers le service IPC approprié.
+ * @brief Analyse un paquet réseau et l'envoie vers le service IPC approprié via la file unique.
  */
 void route_packet(PacketHeader* header, char* payload, int client_fd) {
-    int target_mq = -1;
+    long target_type = -1;
     
-    // Routage basé sur le type de paquet défini dans packet_types.h
+    // Routage basé sur le type de paquet
     switch (header->type) {
         case PACKET_AUTH_REQ:
-            target_mq = auth_mq;
+            target_type = MSG_TYPE_AUTH;
             break;
         case PACKET_MATCHMAKING_REQ:
-            target_mq = matchmaking_mq;
+            target_type = MSG_TYPE_MATCHMAKING;
             break;
         case PACKET_PLAYER_MOVE:
-            target_mq = gameworker_mq;
+            target_type = MSG_TYPE_GAMEWORKER;
             break;
         case PACKET_CHAT_MSG:
-            target_mq = chat_mq;
+            target_type = MSG_TYPE_CHAT;
             break;
         default:
             printf("[Gateway] Type de paquet inconnu: %d\n", header->type);
             return;
     }
 
-    if (target_mq != -1) {
-        // TRÈS IMPORTANT : On utilise le file descriptor (fd) comme identifiant unique du client
-        // Cela permet aux services de savoir à qui répondre sans connaître l'IP du client.
+    if (target_type != -1) {
         header->client_id = client_fd; 
         
         size_t payload_len = header->length - sizeof(PacketHeader);
@@ -79,29 +70,24 @@ void route_packet(PacketHeader* header, char* payload, int client_fd) {
             memcpy(msg_buffer + sizeof(PacketHeader), payload, payload_len);
         }
         
-        // Envoi effectif vers le service interne via la Message Queue
-        ipc_msg_send(target_mq, msg_buffer, header->length, 1);
+        // Envoi vers le service spécifié par son mtype dans la file globale
+        ipc_msg_send(global_mq, msg_buffer, header->length, target_type);
     }
 }
 
 /**
- * @brief Vérifie s'il y a des messages en attente dans la file de retour (gateway_mq).
- * Si oui, les renvoie directement au client TCP concerné.
+ * @brief Vérifie s'il y a des messages pour la Gateway dans la file unique.
  */
 void handle_service_responses() {
     char msg_buffer[MAX_MSG_SIZE];
-    struct {
-        long mtype;
-        char mtext[MAX_MSG_SIZE];
-    } tmp_msg;
-
-    // Lecture non-bloquante (IPC_NOWAIT) pour ne pas figer le serveur réseau
-    while (msgrcv(gateway_mq, &tmp_msg, MAX_MSG_SIZE, 0, IPC_NOWAIT) != -1) {
-        PacketHeader* header = (PacketHeader*)tmp_msg.mtext;
-        int client_fd = header->client_id; // Récupération du destinataire
+    
+    // Lecture non-bloquante des messages destinés à la Gateway (MSG_TYPE_GATEWAY)
+    while (ipc_msg_receive_nowait(global_mq, msg_buffer, MAX_MSG_SIZE, MSG_TYPE_GATEWAY) != -1) {
+        PacketHeader* header = (PacketHeader*)msg_buffer;
+        int client_fd = header->client_id;
         
         printf("[Gateway] Envoi réponse au client fd %d (Type: %d, Length: %d)\n", client_fd, header->type, header->length);
-        send(client_fd, tmp_msg.mtext, header->length, 0);
+        send(client_fd, msg_buffer, header->length, 0);
     }
 }
 

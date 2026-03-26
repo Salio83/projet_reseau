@@ -21,10 +21,12 @@
 int main() {
     printf("[Matchmaker] Démarrage (version sécurisée)...\n");
 
-    // Récupération des trois files de messages nécessaires
-    int matchmaking_mq = ipc_msg_get(ipc_get_key(MATCHMAKING_MSG_QUEUE_PATH, MATCHMAKING_MSG_QUEUE_ID));
-    int gateway_mq = ipc_msg_get(ipc_get_key(GATEWAY_MSG_QUEUE_PATH, GATEWAY_MSG_QUEUE_ID));
-    int gameworker_mq = ipc_msg_get(ipc_get_key(GAMEWORKER_MSG_QUEUE_PATH, GAMEWORKER_MSG_QUEUE_ID));
+    // Récupération de l'identifiant de la file de messages globale
+    int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+    if (global_mq == -1) {
+        perror("ipc_msg_get failed");
+        exit(1);
+    }
 
     // Tableau stockant les IDs (fd) des joueurs en attente
     uint32_t waiting_players[MAX_WAITING];
@@ -34,8 +36,8 @@ int main() {
     char msg_buffer[MAX_MSG_SIZE];
 
     while (1) {
-        // Lecture bloquante des demandes de matchmaking venant du Gateway
-        int nbytes = ipc_msg_receive(matchmaking_mq, msg_buffer, MAX_MSG_SIZE, 1);
+        // Lecture bloquante des demandes de matchmaking destinées à ce service (MSG_TYPE_MATCHMAKING)
+        int nbytes = ipc_msg_receive(global_mq, msg_buffer, MAX_MSG_SIZE, MSG_TYPE_MATCHMAKING);
         if (nbytes > 0) {
             PacketHeader* header = (PacketHeader*)msg_buffer;
             
@@ -77,22 +79,20 @@ int main() {
                 out_h->type = PACKET_GAME_STARTED;
                 out_h->length = sizeof(PacketHeader) + sizeof(GameStarted);
 
-                // --- Notification Joueur 1 (Blanc) ---
+                // --- Notification Joueur 1 (Blanc) via Gateway ---
                 out_h->client_id = p1;
                 gs->game_id = gid; gs->opponent_id = p2; gs->your_color = 0; 
-                ipc_msg_send(gateway_mq, out_buf, out_h->length, 1);
+                ipc_msg_send(global_mq, out_buf, out_h->length, MSG_TYPE_GATEWAY);
 
-                // --- Notification Joueur 2 (Noir) ---
+                // --- Notification Joueur 2 (Noir) via Gateway ---
                 out_h->client_id = p2;
                 gs->game_id = gid; gs->opponent_id = p1; gs->your_color = 1;
-                ipc_msg_send(gateway_mq, out_buf, out_h->length, 1);
+                ipc_msg_send(global_mq, out_buf, out_h->length, MSG_TYPE_GATEWAY);
 
-                // --- Notification du GameWorker ---
-                // On informe le GameWorker qu'une nouvelle partie commence.
-                // Il doit charger le plateau et suivre le tour des joueurs.
+                // --- Notification du GameWorker via la file globale ---
                 out_h->client_id = p1; // Par convention, on utilise l'ID du blanc ici
                 gs->game_id = gid; gs->opponent_id = p2; gs->your_color = 0;
-                ipc_msg_send(gameworker_mq, out_buf, out_h->length, 1);
+                ipc_msg_send(global_mq, out_buf, out_h->length, MSG_TYPE_GAMEWORKER);
 
                 // --- Nettoyage de la file d'attente ---
                 waiting_count -= 2;

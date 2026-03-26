@@ -64,6 +64,24 @@ int ipc_msg_receive(int msqid, void *msg, size_t size, long type) {
     return (int)nbytes;
 }
 
+// Reçoit un message de la file spécifiée de manière non-bloquante
+int ipc_msg_receive_nowait(int msqid, void *msg, size_t size, long type) {
+    struct {
+        long mtype;
+        char mtext[MAX_MSG_SIZE];
+    } tmp_msg;
+
+    // msgrcv avec IPC_NOWAIT pour ne pas bloquer
+    ssize_t nbytes = msgrcv(msqid, &tmp_msg, MAX_MSG_SIZE, type, IPC_NOWAIT);
+    if (nbytes == -1) {
+        return -1;
+    }
+
+    size_t copy_size = (size < (size_t)nbytes) ? size : (size_t)nbytes;
+    memcpy(msg, tmp_msg.mtext, copy_size);
+    return (int)nbytes;
+}
+
 // Supprime la file de messages du système Linux
 int ipc_msg_delete(int msqid) {
     if (msgctl(msqid, IPC_RMID, NULL) == -1) {

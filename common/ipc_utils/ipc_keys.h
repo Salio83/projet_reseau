@@ -11,18 +11,15 @@
  * de s'identifier et de communiquer via des files de messages Linux.
  */
 
-// Chemins utilisés pour générer les clés ftok (doivent pointer vers des fichiers existants)
-#define AUTH_MSG_QUEUE_PATH "/tmp/auth_mq"
-#define MATCHMAKING_MSG_QUEUE_PATH "/tmp/matchmaker_mq"
-#define GAMEWORKER_MSG_QUEUE_PATH "/tmp/gameworker_mq"
-#define CHAT_MSG_QUEUE_PATH "/tmp/chat_mq"
-#define GATEWAY_MSG_QUEUE_PATH "/tmp/gateway_mq" // File de retour pour les réponses vers le Gateway
+// Chemin unique pour la file de messages globale
+#define GLOBAL_MSG_QUEUE_PATH "/tmp/global_mq"
+#define GLOBAL_MSG_QUEUE_ID 100
 
-// Identifiants de projet (proj_id) pour différencier les files sur un même chemin
-#define AUTH_MSG_QUEUE_ID 1
-#define MATCHMAKING_MSG_QUEUE_ID 2
-#define GAMEWORKER_MSG_QUEUE_ID 3
-#define CHAT_MSG_QUEUE_ID 4
-#define GATEWAY_MSG_QUEUE_ID 5
+// Types de messages (mtype) pour le routage au sein de la file unique
+#define MSG_TYPE_AUTH 1
+#define MSG_TYPE_MATCHMAKING 2
+#define MSG_TYPE_GAMEWORKER 3
+#define MSG_TYPE_CHAT 4
+#define MSG_TYPE_GATEWAY 5
 
 #endif // IPC_KEYS_H
