@@ -53,6 +53,7 @@ void game_reset(GameState* game);
 bool game_is_valid_move(GameState* game, int from_row, int from_col, int to_row, int to_col);
 bool game_make_move(GameState* game, int from_row, int from_col, int to_row, int to_col);
 void game_update_state(GameState* game);
+void game_from_fen(GameState* game, const char* fen);
 
 bool game_is_in_check(GameState* game, PlayerColor color);
 bool game_is_checkmate(GameState* game, PlayerColor color);

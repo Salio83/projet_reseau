@@ -75,6 +75,10 @@ void board_to_simple_string(GameState* state, char* buffer) {
         }
         buffer[pos++] = '/';
     }
+    
+    // Ajout du tour actuel pour la synchronisation
+    buffer[pos++] = ' ';
+    buffer[pos++] = (state->current_player == PLAYER_WHITE) ? 'w' : 'b';
     buffer[pos] = '\0';
 }
 

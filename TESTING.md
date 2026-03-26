@@ -1,98 +1,80 @@
-# Guide de Test - Projet Réseau Échecs
+# 🧪 Guide de Test - World Polytech Chess
 
-Ce document explique comment tester les différentes fonctionnalités du projet, de la compilation à l'exécution des tests automatisés et manuels.
+Ce document explique comment tester les différentes fonctionnalités du projet, du moteur de jeu à la partie en ligne.
 
-## 1. Prérequis
+## 🛠️ Préparation de l'environnement
 
-Assurez-vous d'avoir les outils suivants installés :
-- `gcc` (compilateur C)
-- `make`
-- `ipcs` / `ipcrm` (pour la gestion des files de messages IPC)
-- `raylib` (pour la partie graphique, si applicable)
-
-## 2. Compilation
-
-Pour compiler l'ensemble du projet (serveurs, services et outils de test) :
-
-```bash
-make all
-```
-
-Pour nettoyer les fichiers compilés :
+Avant chaque session de test, assurez-vous de compiler l'intégralité du projet :
 
 ```bash
 make clean
+make all
 ```
 
-## 3. Tests Automatisés
+## 🚀 Scénario 1 : Test de la partie en ligne (2 Joueurs Graphiques)
 
-### Test Complet du Système
-Un script est disponible pour lancer tous les services, exécuter une suite de tests, puis tout arrêter proprement.
+C'est le test le plus complet pour vérifier l'intégration totale.
 
-```bash
-make test-full
-# ou
-bash tests/run_full_test.sh
-```
+1.  **Lancer le serveur central :**
+    Dans un terminal dédié :
+    ```bash
+    ./server_app
+    ```
+    *Vous devriez voir les services (Auth, Matchmaker, GameWorker, Gateway) démarrer.*
 
-Ce script teste :
-1. La compilation de tous les modules.
-2. Le lancement des services (Auth, Matchmaker, GameWorker, Server).
-3. La communication IPC entre les services.
-4. Un flux de jeu complet (Matchmaking + déplacements de pièces).
+2.  **Lancer le premier joueur (Blancs) :**
+    Dans un second terminal :
+    ```bash
+    ./chess_game
+    ```
+    Cliquez sur **PLAY**. L'écran affichera "Recherche d'un adversaire...".
 
-### Test de la Suite de Fonctionnalités (IPC)
-Pour tester uniquement la communication entre les files de messages :
+3.  **Lancer le second joueur (Noirs) :**
+    Dans un troisième terminal :
+    ```bash
+    ./chess_game
+    ```
+    Cliquez sur **PLAY**. 
+    *La partie doit se lancer instantanément sur les deux fenêtres.*
 
-```bash
-make test
-```
+4.  **Vérification :**
+    - Faites un coup avec les Blancs.
+    - Vérifiez que le plateau du joueur Noir se met à jour automatiquement.
+    - Vérifiez que le joueur Noir peut maintenant jouer son coup.
 
-## 4. Tests Manuels
+---
 
-### Utilisation du Client Interactif
-Le `client_interactive` permet de simuler un client réel se connectant au serveur.
+## 💻 Scénario 2 : Test Hybride (GUI vs Terminal)
 
-1. **Lancer les services dans des terminaux séparés (ou via le script de test) :**
-   ```bash
-   ./auth_app
-   ./matchmaker_app
-   ./gameworker_app
-   ./server_app
-   ```
+Utile pour tester la compatibilité du protocole.
 
-2. **Lancer un ou plusieurs clients interactifs :**
-   ```bash
-   ./client_interactive <IP_SERVEUR> <PORT>
-   ```
-   *(Par défaut, utilisez `127.0.0.1` et le port configuré dans le serveur)*
+1.  **Lancer le serveur :** `./server_app`
+2.  **Lancer le client graphique :** `./chess_game` (cliquez sur PLAY)
+3.  **Lancer le client interactif :**
+    ```bash
+    ./client_interactive
+    ```
+    Dans le terminal du client interactif, tapez :
+    ```text
+    auth Player2
+    join
+    ```
+    *Le match démarre. Vous pouvez jouer dans le terminal avec `move e2 e4` et voir le résultat sur la fenêtre graphique.*
 
-### Simulation de Paquets Spécifiques
-L'outil `test_client` peut être utilisé pour envoyer des paquets bruts pour tester des cas limites.
+---
 
-```bash
-./test_client
-```
+## 🧹 Nettoyage des ressources (En cas de problème)
 
-## 5. Dépannage et Nettoyage IPC
-
-Le projet utilise des files de messages UNIX (System V IPC). Si un service plante, les files de messages peuvent rester actives et bloquer le redémarrage.
-
-### Nettoyer les ressources IPC
-Pour supprimer toutes les files de messages créées par votre utilisateur :
+Si le serveur plante ou si les services ne veulent plus se lancer, les ressources IPC sont peut-être bloquées. Utilisez :
 
 ```bash
 make clean-ipc
 ```
 
-### Vérifier l'état des files
-Pour voir les files de messages actuellement actives :
+## 🧪 Tests Unitaires (Moteur de jeu)
+
+Pour vérifier que les règles des échecs (échec et mat, pat, déplacements) sont respectées :
 
 ```bash
-ipcs -q
+make test
 ```
-
-## 6. Structure des Tests
-- `tests/test_all_features.c` : Vérifie la robustesse des utilitaires IPC.
-- `tests/test_game_flow.c` : Simule un cycle de vie de partie (connexion -> matchmaking -> jeu).
-- `tests/interactive_client.c` : Client console interactif pour tester l'enchaînement des commandes.

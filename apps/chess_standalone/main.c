@@ -1,6 +1,7 @@
 #include "raylib.h"
 #include "chess.h"
 #include "render.h"
+#include "packet_types.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -8,118 +9,136 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
-#define TCP_PORT 25565
+#define SERVER_IP "127.0.0.1"
+#define SERVER_PORT 6767
 
 typedef enum {
     STATE_MENU,
+    STATE_MATCHMAKING,
     STATE_PLAYING,
     STATE_GAME_OVER
 } GameScreenState;
 
-/*
- * On fait un serveru TCP pour écouter les requêtes .
- * On ouvre un socket ipv4 en mode pas bloquand, et on écoute le port 8080 pour le moment
- */
-int init_tcp_server(int port) {
-    int server_fd;
-    struct sockaddr_in address;
+typedef struct {
+    int sock;
+    uint32_t current_game_id;
+    uint8_t my_color;
+    bool connected;
+    char net_buffer[4096];
+    size_t net_buffer_len;
+} NetworkContext;
 
-    // Création du socket TCP
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("Échec de la création du socket");
-        return -1;
-    }
-
-    //on peut réutiliser le port juste après la fermeture
-    int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
-        perror("setsockopt a échoué");
-    }
-
-    // NONBLOCK
-    int flags = fcntl(server_fd, F_GETFL, 0);
-    fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
-
-    // Préparation du serv
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port); // On passe le port en format réseau
-
-    // Link le socket à l'adresse et au port
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Échec du bind");
-        return -1;
-    }
-
-    // On commence à écouter
-    if (listen(server_fd, 3) < 0) {
-        perror("Échec de l'écoute");
-        return -1;
-    }
-
-    return server_fd;
+void pos_to_algebraic(int row, int col, char* out) {
+    out[0] = 'a' + col;
+    out[1] = '8' - row;
+    out[2] = '\0';
 }
 
+int connect_to_server() {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
 
-/*
- * Chaque frame on va voir les connexions
- * Si on a une connexion, on va voir ce qu'elle nous envoie
- * on traduit le message et on tente de faire le coup
- */
-void process_tcp_clients(int server_fd, GameState* game) {
-    if (server_fd < 0) return;
-    
-    struct sockaddr_in address;
-    socklen_t addrlen = sizeof(address);
-    // Tente d'accepter une nouvelle connexion. Non bloquant grâce à fcntl plus haut.
-    int new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
-    
-    // S'il y a un client connecté
-    if (new_socket >= 0) {
-        // Petit timeout pas trop long pour la lecture
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 50000;
-        setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(SERVER_PORT);
+    inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr);
 
-        char buffer[1024] = {0};
-        // Lecture du message recu
-        int valread = read(new_socket, buffer, sizeof(buffer) - 1);
+    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    // Mode non-bloquant
+    int flags = fcntl(sock, F_GETFL, 0);
+    fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+
+    return sock;
+}
+
+void send_join_matchmaking(int sock) {
+    PacketHeader h = {PACKET_MATCHMAKING_REQ, sizeof(PacketHeader), 0};
+    if (send(sock, &h, sizeof(h), 0) < 0) {
+        perror("send matchmaking failed");
+    } else {
+        printf("Requête matchmaking envoyée au serveur.\n");
+    }
+}
+
+void send_move(int sock, uint32_t game_id, int from_row, int from_col, int to_row, int to_col) {
+    PacketHeader h = {PACKET_PLAYER_MOVE, sizeof(PacketHeader) + sizeof(PlayerMove), 0};
+    PlayerMove move;
+    move.game_id = game_id;
+    pos_to_algebraic(from_row, from_col, move.from_square);
+    pos_to_algebraic(to_row, to_col, move.to_square);
+    move.promotion = '\0';
+    
+    char full_packet[sizeof(PacketHeader) + sizeof(PlayerMove)];
+    memcpy(full_packet, &h, sizeof(PacketHeader));
+    memcpy(full_packet + sizeof(PacketHeader), &move, sizeof(PlayerMove));
+    
+    if (send(sock, full_packet, sizeof(full_packet), 0) < 0) {
+        perror("send move failed");
+    }
+}
+
+void process_network(NetworkContext* net, GameState* game, GameScreenState* state) {
+    if (!net->connected) return;
+
+    char tmp_buf[1024];
+    ssize_t bytes = recv(net->sock, tmp_buf, sizeof(tmp_buf), 0);
+    
+    if (bytes > 0) {
+        if (net->net_buffer_len + bytes <= sizeof(net->net_buffer)) {
+            memcpy(net->net_buffer + net->net_buffer_len, tmp_buf, bytes);
+            net->net_buffer_len += bytes;
+        }
+    } else if (bytes == 0 || (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+        printf("Connexion perdue avec le serveur.\n");
+        net->connected = false;
+        close(net->sock);
+        *state = STATE_MENU;
+        return;
+    }
+
+    // Traitement des paquets complets
+    while (net->net_buffer_len >= sizeof(PacketHeader)) {
+        PacketHeader* h = (PacketHeader*)net->net_buffer;
+        if (net->net_buffer_len < h->length) break; // Paquet incomplet
+
+        char* payload = net->net_buffer + sizeof(PacketHeader);
         
-        if (valread >= 4) {
-            char from_file = buffer[0]; // Colonne de départ
-            char from_rank = buffer[1]; // Rangée de départ
-            char to_file   = buffer[2]; // Colonne d'arrivée 
-            char to_rank   = buffer[3]; // Rangée d'arrivée
-
-            // Vérification
-            if (from_file >= 'a' && from_file <= 'h' &&
-                from_rank >= '1' && from_rank <= '8' &&
-                to_file >= 'a' && to_file <= 'h' &&
-                to_rank >= '1' && to_rank <= '8') {
-                
-                int from_col = from_file - 'a';
-                int from_row = 8 - (from_rank - '0');
-                int to_col   = to_file - 'a';
-                int to_row   = 8 - (to_rank - '0');
-                
-                // Logging au cas ou on a des problèmes
-                printf("Serveur TCP : Coup reçu %c%c%c%c (de %d,%d vers %d,%d)\n", 
-                       from_file, from_rank, to_file, to_rank, 
-                       from_row, from_col, to_row, to_col);
-                
-                // On passe le coup au moteur.Pour l'instant on vérifie pas si il est valide ou pas
-                // le jeu s'en occupe mais ne donne pas de feedback
-                if (game_make_move(game, from_row, from_col, to_row, to_col)) {
-                    printf("Serveur TCP : Coup appliqué avec succès !\n");
-                } else {
-                    printf("Serveur TCP : Coup invalide !\n");
+        switch (h->type) {
+            case PACKET_GAME_STARTED: {
+                GameStarted* gs = (GameStarted*)payload;
+                net->current_game_id = gs->game_id;
+                net->my_color = gs->your_color;
+                *state = STATE_PLAYING;
+                game_reset(game);
+                printf("PARTIE DÉMARRÉE ! ID=%d, Vous jouez les %s\n", 
+                       gs->game_id, gs->your_color == 0 ? "Blancs" : "Noirs");
+                break;
+            }
+            case PACKET_GAME_STATE_UDP: {
+                GameStateUDP* gsu = (GameStateUDP*)payload;
+                if (gsu->game_id == net->current_game_id) {
+                    game_from_fen(game, gsu->fen_board);
                 }
+                break;
+            }
+            case PACKET_MOVE_ERROR: {
+                printf("Mouvement invalide refusé par le serveur.\n");
+                break;
             }
         }
-        // Fermeture de la connexion après avoir traité la requête
-        close(new_socket);
+        
+        size_t handled = h->length;
+        if (handled < sizeof(PacketHeader)) handled = sizeof(PacketHeader);
+        if (handled > net->net_buffer_len) handled = net->net_buffer_len;
+        
+        memmove(net->net_buffer, net->net_buffer + handled, net->net_buffer_len - handled);
+        net->net_buffer_len -= handled;
     }
 }
 
@@ -128,7 +147,7 @@ int main(void)
     const int screenWidth = 1000;
     const int screenHeight = 900;
 
-    InitWindow(screenWidth, screenHeight, "Chess - 2 Player Game");
+    InitWindow(screenWidth, screenHeight, "World Polytech Chess - Online");
     SetTargetFPS(60);
 
     PieceTextures textures = {0};
@@ -142,35 +161,58 @@ int main(void)
     int board_y = 50;
     int square_size = 80;
 
-    int tcp_server_fd = init_tcp_server(TCP_PORT);
+    NetworkContext net = {-1, 0, 0, false, {0}, 0};
 
     while (!WindowShouldClose())
     {
+        process_network(&net, game, &screen_state);
+
         BeginDrawing();
+        ClearBackground((Color){30, 30, 30, 255});
 
         if (screen_state == STATE_MENU) {
             render_menu(screenWidth, screenHeight, &hovered_button);
 
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                if (hovered_button == 1) {
-                    screen_state = STATE_PLAYING;
-                    game_reset(game);
+                if (hovered_button == 1) { // Bouton "Play"
+                    net.sock = connect_to_server();
+                    if (net.sock >= 0) {
+                        net.connected = true;
+                        net.net_buffer_len = 0;
+                        send_join_matchmaking(net.sock);
+                        screen_state = STATE_MATCHMAKING;
+                    } else {
+                        printf("Erreur: Impossible de se connecter au serveur backend (Port 6767).\n");
+                    }
                 } else if (hovered_button == 2) {
                     break;
                 }
             }
         }
-        else if (screen_state == STATE_PLAYING) {
-            ClearBackground((Color){50, 50, 50, 255});
-
-            process_tcp_clients(tcp_server_fd, game);
-
-            if (game->checkmate || game->stalemate) {
-                screen_state = STATE_GAME_OVER;
+        else if (screen_state == STATE_MATCHMAKING) {
+            DrawText("Recherche d'un adversaire...", screenWidth/2 - 150, screenHeight/2 - 20, 20, RAYWHITE);
+            DrawText("En attente de connexion sur le serveur...", screenWidth/2 - 180, screenHeight/2 + 20, 15, GRAY);
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                screen_state = STATE_MENU;
+                if (net.connected) {
+                    close(net.sock);
+                    net.connected = false;
+                }
             }
-
+        }
+        else if (screen_state == STATE_PLAYING) {
             render_board(game, board_x, board_y, square_size, &textures);
             render_ui_info(game, screenWidth, screenHeight);
+
+            DrawText(TextFormat("ID Partie: %d", net.current_game_id), 20, 20, 20, RAYWHITE);
+            DrawText(TextFormat("Vous êtes: %s", net.my_color == 0 ? "BLANCS" : "NOIRS"), 20, 50, 20, net.my_color == 0 ? WHITE : GRAY);
+            
+            if (game->current_player == (PlayerColor)net.my_color) {
+                DrawRectangle(15, 80, 200, 30, (Color){0, 228, 48, 100});
+                DrawText("C'EST VOTRE TOUR", 20, 85, 20, GOLD);
+            } else {
+                DrawText("Attente de l'adversaire...", 20, 85, 20, GRAY);
+            }
 
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 Vector2 mouse_pos = GetMousePosition();
@@ -180,7 +222,7 @@ int main(void)
                 if (row >= 0 && row < 8 && col >= 0 && col < 8) {
                     if (game->selected_row == -1) {
                         if (game->board[row][col].type != PIECE_NONE &&
-                            game->board[row][col].color == game->current_player) {
+                            game->board[row][col].color == (PlayerColor)net.my_color) {
                             game->selected_row = row;
                             game->selected_col = col;
                         }
@@ -188,41 +230,30 @@ int main(void)
                         if (game->selected_row == row && game->selected_col == col) {
                             game->selected_row = -1;
                             game->selected_col = -1;
-                        } else if (game_make_move(game, game->selected_row, game->selected_col, row, col)) {
+                        } else {
+                            if (game->current_player == (PlayerColor)net.my_color) {
+                                send_move(net.sock, net.current_game_id, game->selected_row, game->selected_col, row, col);
+                            }
                             game->selected_row = -1;
                             game->selected_col = -1;
-
-                            if (game->checkmate || game->stalemate) {
-                                screen_state = STATE_GAME_OVER;
-                            }
-                        } else {
-                            if (game->board[row][col].type != PIECE_NONE &&
-                                game->board[row][col].color == game->current_player) {
-                                game->selected_row = row;
-                                game->selected_col = col;
-                            } else {
-                                game->selected_row = -1;
-                                game->selected_col = -1;
-                            }
                         }
                     }
                 }
             }
 
-            if (IsKeyPressed(KEY_R)) {
-                game_reset(game);
+            if (game->checkmate || game->stalemate) {
+                screen_state = STATE_GAME_OVER;
             }
         }
         else if (screen_state == STATE_GAME_OVER) {
-            ClearBackground((Color){50, 50, 50, 255});
             render_board(game, board_x, board_y, square_size, &textures);
             render_ui_info(game, screenWidth, screenHeight);
             render_game_over_screen(screenWidth, screenHeight, game, &hovered_button);
 
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                if (hovered_button == 1) {
-                    game_reset(game);
-                    screen_state = STATE_PLAYING;
+                if (hovered_button == 1) { 
+                    send_join_matchmaking(net.sock);
+                    screen_state = STATE_MATCHMAKING;
                 } else if (hovered_button == 2) {
                     screen_state = STATE_MENU;
                 }
@@ -232,6 +263,7 @@ int main(void)
         EndDrawing();
     }
 
+    if (net.connected) close(net.sock);
     game_free(game);
     unload_piece_textures(&textures);
     CloseWindow();

@@ -364,6 +364,56 @@ void game_update_state(GameState* game) {
     game->stalemate = game_is_stalemate(game, game->current_player);
 }
 
+void game_from_fen(GameState* game, const char* fen) {
+    if (!fen) return;
+    
+    // On vide le plateau
+    memset(game->board, 0, sizeof(game->board));
+    
+    int row = 0, col = 0;
+    const char* p = fen;
+    
+    while (*p && *p != ' ') {
+        if (*p == '/') {
+            if (row < 7) row++;
+            col = 0;
+        } else if (*p >= '1' && *p <= '8') {
+            col += (*p - '0');
+        } else if (*p == '.') {
+            col++;
+        } else {
+            Piece piece = {PIECE_NONE, 0};
+            char c = *p;
+            piece.color = (c >= 'a' && c <= 'z') ? PLAYER_BLACK : PLAYER_WHITE;
+            if (c >= 'A' && c <= 'Z') c += 32; // Vers minuscule
+            
+            switch (c) {
+                case 'p': piece.type = PAWN; break;
+                case 'n': piece.type = KNIGHT; break;
+                case 'b': piece.type = BISHOP; break;
+                case 'r': piece.type = ROOK; break;
+                case 'q': piece.type = QUEEN; break;
+                case 'k': piece.type = KING; break;
+            }
+            
+            if (row < 8 && col < 8) {
+                game->board[row][col] = piece;
+            }
+            col++;
+        }
+        p++;
+    }
+    
+    // Tour de jeu
+    if (*p == ' ') {
+        p++;
+        if (*p == 'w') game->current_player = PLAYER_WHITE;
+        else if (*p == 'b') game->current_player = PLAYER_BLACK;
+    }
+    
+    game_update_state(game);
+}
+
 bool game_is_in_check(GameState* game, PlayerColor color) {
     int king_row = -1, king_col = -1;
 
