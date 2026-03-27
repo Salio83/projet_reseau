@@ -42,5 +42,5 @@ $TEST_GAME
 
 # Nettoyage
 echo "=== ARRÊT DU SYSTÈME ==="
-kill $AUTH_PID $MATCH_PID $GW_PID $SERVER_PID
+kill $AUTH_PID $MATCH_PID $GW_PID $SERVER_PID 2>/dev/null
 echo "Terminé."

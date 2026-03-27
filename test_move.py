@@ -1,7 +1,7 @@
 import socket
 import sys
 
-def send_move(move_str, host='127.0.0.1', port=8080):
+def send_move(move_str, host='127.0.0.1', port=6767):
     if len(move_str) != 4:
         print("Move must be exactly 4 characters, e.g., e2e4")
         return
