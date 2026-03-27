@@ -85,7 +85,7 @@ static void draw_piece(PieceType type, PlayerColor color, int x, int y, int size
     DrawTextureEx(*texture, (Vector2){x + (size - 64) / 2.0f, y + (size - 64) / 2.0f}, 0.0f, scale, WHITE);
 }
 
-void render_board(GameState* game, int board_x, int board_y, int square_size, PieceTextures* textures) {
+void render_board(GameState* game, int board_x, int board_y, int square_size, bool flipped, PieceTextures* textures) {
     Color light_sq = (Color){229, 230, 234, 255};
     Color dark_sq = (Color){121, 130, 147, 255};
     Color light_last_move = (Color){220, 230, 200, 255};
@@ -98,10 +98,13 @@ void render_board(GameState* game, int board_x, int board_y, int square_size, Pi
             int x = board_x + col * square_size;
             int y = board_y + row * square_size;
 
+            int brow = flipped ? (7 - row) : row;
+            int bcol = flipped ? (7 - col) : col;
+
             bool is_light = (row + col) % 2 == 0;
-            bool is_last_move = (game->last_from_row == row && game->last_from_col == col) ||
-                                (game->last_to_row == row && game->last_to_col == col);
-            bool is_selected = (game->selected_row == row && game->selected_col == col);
+            bool is_last_move = (game->last_from_row == brow && game->last_from_col == bcol) ||
+                                (game->last_to_row == brow && game->last_to_col == bcol);
+            bool is_selected = (game->selected_row == brow && game->selected_col == bcol);
 
             Color sq_color;
             if (is_selected) {
@@ -114,7 +117,7 @@ void render_board(GameState* game, int board_x, int board_y, int square_size, Pi
 
             DrawRectangle(x, y, square_size, square_size, sq_color);
 
-            Piece piece = game->board[row][col];
+            Piece piece = game->board[brow][bcol];
             if (piece.type != PIECE_NONE) {
                 draw_piece(piece.type, piece.color, x, y, square_size, textures);
             }

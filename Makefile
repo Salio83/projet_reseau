@@ -1,9 +1,10 @@
 # Configuration du compilateur
 CC = gcc
-CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -DPROJECT_DIR=\"$(shell pwd)\"
+CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs -DPROJECT_DIR=\"$(shell pwd)\"
 
 # Bibliothèques
-RAYLIB_LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+# Use locally built raylib with Wayland backend (bypasses broken X11/GLX on this machine)
+RAYLIB_LIBS = libs/libraylib.a -lEGL -lwayland-client -lwayland-egl -lxkbcommon -lm -lpthread -ldl -lrt
 SERVER_LIBS = -lpthread
 
 # Chemins des sources
@@ -14,7 +15,7 @@ MATCHMAKER_SRCS = services/matchmaker/matchmaker_main.c common/ipc_utils/ipc_uti
 GAMEWORKER_SRCS = services/game_worker/game_worker_main.c common/ipc_utils/ipc_utils.c common/chess_engine/chess.c
 
 # Cibles principales
-all: server auth_service matchmaker_service gameworker_service chess test_client test_suite test_game_flow client_interactive
+all: server auth_service matchmaker_service gameworker_service chess chess_gui_client test_client test_suite test_game_flow client_interactive
 
 # Compilation du Serveur Unifié
 server: $(SERVER_SRCS)
@@ -41,6 +42,12 @@ chess: $(CHESS_SRCS)
 	@echo "Compilation du jeu d'échecs..."
 	$(CC) $(CFLAGS) $(CHESS_SRCS) $(RAYLIB_LIBS) -o chess_game
 
+# Compilation du client GUI réseau
+GUI_CLIENT_SRCS = apps/chess_gui_client/main.c common/chess_engine/chess.c common/render/render.c
+chess_gui_client: $(GUI_CLIENT_SRCS)
+	@echo "Compilation du client GUI réseau..."
+	$(CC) $(CFLAGS) $(GUI_CLIENT_SRCS) $(RAYLIB_LIBS) -lpthread -o chess_gui_client
+
 # Client interactif pour les tests manuels
 client_interactive: tests/interactive_client.c
 	@echo "Compilation du client interactif..."
@@ -65,7 +72,7 @@ test-full: all
 
 # Nettoyage
 clean:
-	rm -f chess_game server_app auth_app matchmaker_app gameworker_app test_client test_suite test_game_flow client_interactive gateway
+	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app test_client test_suite test_game_flow client_interactive gateway
 	rm -rf build/
 
 # Nettoyage manuel des ressources IPC (en cas de plantage)

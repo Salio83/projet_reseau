@@ -15,7 +15,7 @@ typedef struct {
 
 void load_piece_textures(PieceTextures* textures);
 void unload_piece_textures(PieceTextures* textures);
-void render_board(GameState* game, int board_x, int board_y, int square_size, PieceTextures* textures);
+void render_board(GameState* game, int board_x, int board_y, int square_size, bool flipped, PieceTextures* textures);
 void render_menu(int screen_width, int screen_height, int* hovered_button);
 void render_game_over_screen(int screen_width, int screen_height, GameState* game, int* hovered_button);
 void render_ui_info(GameState* game, int screen_width, int screen_height);

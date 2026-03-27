@@ -33,6 +33,11 @@ void setup_ipc() {
 
     // Récupération de l'ID de la file globale
     global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+    if (global_mq == -1) {
+        fprintf(stderr, "[Gateway] ERREUR: Impossible d'accéder à la file IPC (global_mq=-1). Quitter.\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("[Gateway] File IPC initialisée (global_mq=%d)\n", global_mq);
 }
 
 /**
@@ -61,16 +66,18 @@ void route_packet(PacketHeader* header, char* payload, int client_fd) {
     }
 
     if (target_type != -1) {
-        header->client_id = client_fd; 
-        
+        header->client_id = client_fd;
+
         size_t payload_len = header->length - sizeof(PacketHeader);
         char msg_buffer[MAX_MSG_SIZE];
         memcpy(msg_buffer, header, sizeof(PacketHeader));
         if (payload_len > 0) {
             memcpy(msg_buffer + sizeof(PacketHeader), payload, payload_len);
         }
-        
+
         // Envoi vers le service spécifié par son mtype dans la file globale
+        printf("[Gateway] Routage paquet type=%d vers mtype=%ld, size=%d, global_mq=%d\n",
+               header->type, target_type, header->length, global_mq);
         ipc_msg_send(global_mq, msg_buffer, header->length, target_type);
     }
 }

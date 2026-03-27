@@ -164,7 +164,7 @@ int main(void) {
         screen_state = STATE_GAME_OVER;
       }
 
-      render_board(game, board_x, board_y, square_size, &textures);
+      render_board(game, board_x, board_y, square_size, false, &textures);
       render_ui_info(game, screenWidth, screenHeight);
 
       if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -210,7 +210,7 @@ int main(void) {
       }
     } else if (screen_state == STATE_GAME_OVER) {
       ClearBackground((Color){50, 50, 50, 255});
-      render_board(game, board_x, board_y, square_size, &textures);
+      render_board(game, board_x, board_y, square_size, false, &textures);
       render_ui_info(game, screenWidth, screenHeight);
       render_game_over_screen(screenWidth, screenHeight, game, &hovered_button);
 
