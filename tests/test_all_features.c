@@ -155,7 +155,7 @@ void test_network_auth() {
   PacketHeader header;
   header.type = PACKET_AUTH_REQ;
   header.length = sizeof(PacketHeader) + sizeof(AuthRequest);
-  header.client_id = 0;
+  header.session_id = 0;
 
   AuthRequest auth;
   strncpy(auth.username, "TestRunner", 32);
@@ -175,8 +175,8 @@ void test_network_auth() {
     PacketHeader *res_header = (PacketHeader *)buffer;
     printf(GREEN "[PASSED] Response received! Type: %d\n" RESET,
            res_header->type);
-    if (res_header->type == PACKET_AUTH_REQ) {
-      AuthRequest *res_auth = (AuthRequest *)(buffer + sizeof(PacketHeader));
+    if (res_header->type == PACKET_AUTH_OK) {
+      AuthOk *res_auth = (AuthOk *)(buffer + sizeof(PacketHeader));
       if (strcmp(res_auth->username, "TestRunner") == 0) {
         printf(GREEN "[PASSED] Auth confirmation for %s\n" RESET,
                res_auth->username);

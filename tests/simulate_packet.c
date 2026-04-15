@@ -38,7 +38,7 @@ int main() {
   PacketHeader header;
   header.type = PACKET_AUTH_REQ;
   header.length = sizeof(PacketHeader) + sizeof(AuthRequest);
-  header.client_id = 0; // Sera rempli par le Gateway
+  header.session_id = 0; // Sera rempli par le Gateway
 
   AuthRequest auth;
   strncpy(auth.username, "Joueur_Test", 32);
@@ -60,8 +60,8 @@ int main() {
     printf("[Client] Réponse reçue du Gateway ! Type: %d, Taille: %d\n",
            res_header->type, res_header->length);
 
-    if (res_header->type == PACKET_AUTH_REQ) {
-      AuthRequest *res_auth = (AuthRequest *)(buffer + sizeof(PacketHeader));
+    if (res_header->type == PACKET_AUTH_OK) {
+      AuthOk *res_auth = (AuthOk *)(buffer + sizeof(PacketHeader));
       printf("[Client] Confirmation pour l'utilisateur: %s\n",
              res_auth->username);
     }

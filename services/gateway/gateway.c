@@ -1,130 +1,340 @@
 #define _GNU_SOURCE
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <sys/select.h>
-#include <fcntl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
 
-#include "gateway.h"
-#include "../../common/network_models/packet_types.h"
-#include "../../common/ipc_utils/ipc_utils.h"
 #include "../../common/ipc_utils/ipc_keys.h"
+#include "../../common/ipc_utils/ipc_utils.h"
+#include "../../common/network_models/packet_types.h"
+#include "gateway.h"
 
-#define PORT 6767
+#define TCP_PORT 6767
+#define UDP_PORT 6768
 #define MAX_CLIENTS 100
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE MAX_MSG_SIZE
 
-// Identifiant unique pour la file de messages globale
-int global_mq;
+typedef struct {
+    int in_use;
+    int authenticated;
+    int tcp_fd;
+    uint32_t session_id;
+    struct sockaddr_in udp_addr;
+    int udp_registered;
+    char username[MAX_USERNAME_LEN];
+    uint32_t current_room_id;
+    uint8_t role;
+} ClientSession;
 
-/**
- * @brief Prépare l'environnement IPC en créant le fichier nécessaire et en récupérant la file.
- */
-void setup_ipc() {
-    // Création préventive du fichier pour ftok s'il n'existe pas sur le disque
-    int fd = open(GLOBAL_MSG_QUEUE_PATH, O_CREAT | O_RDWR, 0666);
-    if (fd != -1) close(fd);
+static int global_mq;
+static int udp_server_fd;
+static uint32_t next_session_id = 1;
+static ClientSession sessions[MAX_CLIENTS];
 
-    // Récupération de l'ID de la file globale
-    global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
-    if (global_mq == -1) {
-        fprintf(stderr, "[Gateway] ERREUR: Impossible d'accéder à la file IPC (global_mq=-1). Quitter.\n");
-        exit(EXIT_FAILURE);
+static int send_all(int fd, const void *buffer, size_t len) {
+    const char *cursor = (const char *)buffer;
+    while (len > 0) {
+        ssize_t written = send(fd, cursor, len, 0);
+        if (written <= 0) {
+            return -1;
+        }
+        cursor += written;
+        len -= (size_t)written;
     }
-    printf("[Gateway] File IPC initialisée (global_mq=%d)\n", global_mq);
+    return 0;
 }
 
-/**
- * @brief Analyse un paquet réseau et l'envoie vers le service IPC approprié via la file unique.
- */
-void route_packet(PacketHeader* header, char* payload, int client_fd) {
+static int recv_all(int fd, void *buffer, size_t len) {
+    char *cursor = (char *)buffer;
+    size_t received = 0;
+
+    while (received < len) {
+        ssize_t chunk = recv(fd, cursor + received, len - received, 0);
+        if (chunk <= 0) {
+            return -1;
+        }
+        received += (size_t)chunk;
+    }
+
+    return 0;
+}
+
+static void setup_ipc(void) {
+    int fd = open(GLOBAL_MSG_QUEUE_PATH, O_CREAT | O_RDWR, 0666);
+    if (fd != -1) {
+        close(fd);
+    }
+
+    global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+    if (global_mq == -1) {
+        fprintf(stderr, "[Gateway] Impossible d'accéder à la file IPC.\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static ClientSession *find_session_by_id(uint32_t session_id) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (sessions[i].in_use && sessions[i].session_id == session_id) {
+            return &sessions[i];
+        }
+    }
+    return NULL;
+}
+
+static ClientSession *create_session(int tcp_fd) {
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (!sessions[i].in_use) {
+            memset(&sessions[i], 0, sizeof(sessions[i]));
+            sessions[i].in_use = 1;
+            sessions[i].tcp_fd = tcp_fd;
+            sessions[i].session_id = next_session_id++;
+            return &sessions[i];
+        }
+    }
+    return NULL;
+}
+
+static void send_packet_error(ClientSession *session, uint16_t code, const char *message) {
+    if (!session || session->tcp_fd <= 0) {
+        return;
+    }
+
+    char out_buf[MAX_MSG_SIZE];
+    PacketHeader *header = (PacketHeader *)out_buf;
+    PacketError *error = (PacketError *)(out_buf + sizeof(PacketHeader));
+
+    memset(out_buf, 0, sizeof(out_buf));
+    header->type = PACKET_ERROR;
+    header->length = sizeof(PacketHeader) + sizeof(PacketError);
+    header->session_id = session->session_id;
+    error->code = code;
+    strncpy(error->message, message, sizeof(error->message) - 1);
+
+    send_all(session->tcp_fd, out_buf, header->length);
+}
+
+static void notify_disconnect(const ClientSession *session) {
+    if (!session) {
+        return;
+    }
+
+    char out_buf[MAX_MSG_SIZE];
+    PacketHeader *header = (PacketHeader *)out_buf;
+    ClientDisconnected *payload = (ClientDisconnected *)(out_buf + sizeof(PacketHeader));
+
+    memset(out_buf, 0, sizeof(out_buf));
+    header->type = PACKET_CLIENT_DISCONNECTED;
+    header->length = sizeof(PacketHeader) + sizeof(ClientDisconnected);
+    header->session_id = session->session_id;
+    payload->room_id = session->current_room_id;
+    payload->role = session->role;
+
+    ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_GAMEWORKER);
+}
+
+static void destroy_session(ClientSession *session) {
+    if (!session || !session->in_use) {
+        return;
+    }
+
+    notify_disconnect(session);
+    if (session->tcp_fd > 0) {
+        close(session->tcp_fd);
+    }
+    memset(session, 0, sizeof(*session));
+}
+
+static void route_packet(ClientSession *session, PacketHeader *header, const char *payload) {
+    char out_buf[MAX_MSG_SIZE];
+    size_t payload_len = header->length - sizeof(PacketHeader);
     long target_type = -1;
-    
-    // Routage basé sur le type de paquet
+
+    if (!session) {
+        return;
+    }
+
+    if (!session->authenticated && header->type != PACKET_AUTH_REQ) {
+        send_packet_error(session, 401, "Authentification requise.");
+        return;
+    }
+
+    memset(out_buf, 0, sizeof(out_buf));
+    header->session_id = session->session_id;
+
     switch (header->type) {
         case PACKET_AUTH_REQ:
             target_type = MSG_TYPE_AUTH;
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            if (payload_len > 0) {
+                memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
+            }
             break;
-        case PACKET_MATCHMAKING_REQ:
+        case PACKET_MATCHMAKING_REQ: {
+            MatchmakingRequest req;
+            memset(&req, 0, sizeof(req));
+            req.player_id = session->session_id;
+            strncpy(req.username, session->username, sizeof(req.username) - 1);
+            header->length = sizeof(PacketHeader) + sizeof(MatchmakingRequest);
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            memcpy(out_buf + sizeof(PacketHeader), &req, sizeof(req));
             target_type = MSG_TYPE_MATCHMAKING;
             break;
+        }
         case PACKET_PLAYER_MOVE:
+        case PACKET_CHAT_MSG:
+        case PACKET_LIST_ACTIVE_GAMES_REQ:
+        case PACKET_SPECTATE_LEAVE_REQ:
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            if (payload_len > 0) {
+                memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
+            }
             target_type = MSG_TYPE_GAMEWORKER;
             break;
-        case PACKET_CHAT_MSG:
-            target_type = MSG_TYPE_CHAT;
+        case PACKET_SPECTATE_JOIN_REQ: {
+            SpectateJoinRequest request;
+            memset(&request, 0, sizeof(request));
+            if (payload_len >= sizeof(request)) {
+                memcpy(&request, payload, sizeof(request));
+            } else if (payload_len >= sizeof(request.room_id)) {
+                memcpy(&request, payload, sizeof(request.room_id));
+            }
+            strncpy(request.username, session->username, sizeof(request.username) - 1);
+            header->length = sizeof(PacketHeader) + sizeof(SpectateJoinRequest);
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            memcpy(out_buf + sizeof(PacketHeader), &request, sizeof(request));
+            target_type = MSG_TYPE_GAMEWORKER;
             break;
+        }
         default:
-            printf("[Gateway] Type de paquet inconnu: %d\n", header->type);
+            send_packet_error(session, 400, "Type de paquet inconnu.");
             return;
     }
 
-    if (target_type != -1) {
-        header->client_id = client_fd;
+    ipc_msg_send(global_mq, out_buf, header->length, target_type);
+}
 
-        size_t payload_len = header->length - sizeof(PacketHeader);
-        char msg_buffer[MAX_MSG_SIZE];
-        memcpy(msg_buffer, header, sizeof(PacketHeader));
-        if (payload_len > 0) {
-            memcpy(msg_buffer + sizeof(PacketHeader), payload, payload_len);
+static void handle_udp_registration(void) {
+    char buffer[MAX_MSG_SIZE];
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    ssize_t received = recvfrom(udp_server_fd, buffer, sizeof(buffer), 0,
+                                (struct sockaddr *)&client_addr, &client_len);
+
+    if (received < (ssize_t)(sizeof(PacketHeader) + sizeof(UdpRegisterRequest))) {
+        return;
+    }
+
+    PacketHeader *header = (PacketHeader *)buffer;
+    if (header->type != PACKET_UDP_REGISTER_REQ) {
+        return;
+    }
+
+    UdpRegisterRequest *request = (UdpRegisterRequest *)(buffer + sizeof(PacketHeader));
+    ClientSession *session = find_session_by_id(request->session_id);
+    if (!session) {
+        return;
+    }
+
+    session->udp_addr = client_addr;
+    session->udp_registered = 1;
+}
+
+static void handle_service_responses(void) {
+    char msg_buffer[MAX_MSG_SIZE];
+
+    while (ipc_msg_receive_nowait(global_mq, msg_buffer, sizeof(msg_buffer), MSG_TYPE_GATEWAY) != -1) {
+        PacketHeader *header = (PacketHeader *)msg_buffer;
+        ClientSession *session = find_session_by_id(header->session_id);
+
+        if (header->type == PACKET_GAME_UPDATE_UDP) {
+            if (!session) {
+                continue;
+            }
+            if (session->udp_registered) {
+                sendto(udp_server_fd, msg_buffer, header->length, 0,
+                       (struct sockaddr *)&session->udp_addr, sizeof(session->udp_addr));
+            } else {
+                send_all(session->tcp_fd, msg_buffer, header->length);
+            }
+            continue;
         }
 
-        // Envoi vers le service spécifié par son mtype dans la file globale
-        printf("[Gateway] Routage paquet type=%d vers mtype=%ld, size=%d, global_mq=%d\n",
-               header->type, target_type, header->length, global_mq);
-        ipc_msg_send(global_mq, msg_buffer, header->length, target_type);
+        if (!session) {
+            continue;
+        }
+
+        if (header->type == PACKET_AUTH_OK) {
+            AuthOk *ok = (AuthOk *)(msg_buffer + sizeof(PacketHeader));
+            session->authenticated = 1;
+            strncpy(session->username, ok->username, sizeof(session->username) - 1);
+        } else if (header->type == PACKET_GAME_STARTED) {
+            GameStarted *started = (GameStarted *)(msg_buffer + sizeof(PacketHeader));
+            session->current_room_id = started->room_id;
+            session->role = ROOM_ROLE_PLAYER;
+        } else if (header->type == PACKET_SPECTATE_JOIN_OK) {
+            SpectateStatus *status = (SpectateStatus *)(msg_buffer + sizeof(PacketHeader));
+            session->current_room_id = status->room_id;
+            session->role = ROOM_ROLE_SPECTATOR;
+        } else if (header->type == PACKET_SPECTATE_LEAVE_OK) {
+            session->current_room_id = 0;
+            session->role = ROOM_ROLE_NONE;
+        }
+
+        if (send_all(session->tcp_fd, msg_buffer, header->length) == -1) {
+            destroy_session(session);
+        }
     }
 }
 
-/**
- * @brief Vérifie s'il y a des messages pour la Gateway dans la file unique.
- */
-void handle_service_responses() {
-    char msg_buffer[MAX_MSG_SIZE];
-    
-    // Lecture non-bloquante des messages destinés à la Gateway (MSG_TYPE_GATEWAY)
-    while (ipc_msg_receive_nowait(global_mq, msg_buffer, MAX_MSG_SIZE, MSG_TYPE_GATEWAY) != -1) {
-        PacketHeader* header = (PacketHeader*)msg_buffer;
-        int client_fd = header->client_id;
-        
-        printf("[Gateway] Envoi réponse au client fd %d (Type: %d, Length: %d)\n", client_fd, header->type, header->length);
-        send(client_fd, msg_buffer, header->length, 0);
-    }
-}
-
-/**
- * @brief Boucle principale utilisant select() pour gérer multiplexage réseau et IPC.
- */
-void start_gateway() {
-    int server_fd, new_socket, client_socket[MAX_CLIENTS], max_sd, sd;
-    struct sockaddr_in address;
-    fd_set readfds;
+void start_gateway(void) {
+    int server_fd;
+    struct sockaddr_in tcp_addr;
+    struct sockaddr_in udp_addr;
 
     setup_ipc();
+    memset(sessions, 0, sizeof(sessions));
 
-    for (int i = 0; i < MAX_CLIENTS; i++) client_socket[i] = 0;
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
 
-    // Création du socket serveur TCP
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("socket failed");
+    udp_server_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (udp_server_fd < 0) {
+        perror("socket udp");
         exit(EXIT_FAILURE);
     }
 
     int opt = 1;
     setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    setsockopt(udp_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    memset(&tcp_addr, 0, sizeof(tcp_addr));
+    tcp_addr.sin_family = AF_INET;
+    tcp_addr.sin_addr.s_addr = INADDR_ANY;
+    tcp_addr.sin_port = htons(TCP_PORT);
 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("bind failed");
+    if (bind(server_fd, (struct sockaddr *)&tcp_addr, sizeof(tcp_addr)) < 0) {
+        perror("bind tcp");
+        exit(EXIT_FAILURE);
+    }
+
+    memset(&udp_addr, 0, sizeof(udp_addr));
+    udp_addr.sin_family = AF_INET;
+    udp_addr.sin_addr.s_addr = INADDR_ANY;
+    udp_addr.sin_port = htons(UDP_PORT);
+
+    if (bind(udp_server_fd, (struct sockaddr *)&udp_addr, sizeof(udp_addr)) < 0) {
+        perror("bind udp");
         exit(EXIT_FAILURE);
     }
 
@@ -133,76 +343,86 @@ void start_gateway() {
         exit(EXIT_FAILURE);
     }
 
-    printf("Gateway en ligne sur le port %d\n", PORT);
+    printf("[Gateway] TCP %d / UDP %d prêts.\n", TCP_PORT, UDP_PORT);
 
-    // ---  Boucle principale ---
-    while(1) {
+    while (1) {
+        fd_set readfds;
+        int max_fd = server_fd;
+
         FD_ZERO(&readfds);
         FD_SET(server_fd, &readfds);
-        max_sd = server_fd;
-
-        // Ajout des sockets clients existants à la liste de surveillance
-        for (int i = 0; i < MAX_CLIENTS; i++) {
-            sd = client_socket[i];
-            if(sd > 0) FD_SET(sd, &readfds);
-            if(sd > max_sd) max_sd = sd;
+        FD_SET(udp_server_fd, &readfds);
+        if (udp_server_fd > max_fd) {
+            max_fd = udp_server_fd;
         }
 
-        // Timeout court pour alterner entre réseau et lecture des Message Queues
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (sessions[i].in_use && sessions[i].tcp_fd > 0) {
+                FD_SET(sessions[i].tcp_fd, &readfds);
+                if (sessions[i].tcp_fd > max_fd) {
+                    max_fd = sessions[i].tcp_fd;
+                }
+            }
+        }
+
         struct timeval tv;
         tv.tv_sec = 0;
-        tv.tv_usec = 100000; // 100ms
+        tv.tv_usec = 100000;
 
-        int activity = select(max_sd + 1, &readfds, NULL, NULL, &tv);
-
-        if ((activity < 0) && (errno != EINTR)) {
-            printf("select error");
+        int activity = select(max_fd + 1, &readfds, NULL, NULL, &tv);
+        if (activity < 0 && errno != EINTR) {
+            perror("select");
         }
 
-        // --- 1. Gérer les réponses provenant des services internes ---
         handle_service_responses();
 
-        // --- 2. Gérer les nouvelles demandes de connexion ---
+        if (FD_ISSET(udp_server_fd, &readfds)) {
+            handle_udp_registration();
+        }
+
         if (FD_ISSET(server_fd, &readfds)) {
-            int addrlen = sizeof(address);
-            if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-                perror("accept");
-                exit(EXIT_FAILURE);
-            }
-            printf("Nouveau client : fd %d\n", new_socket);
-            
-            for (int i = 0; i < MAX_CLIENTS; i++) {
-                if( client_socket[i] == 0 ) {
-                    client_socket[i] = new_socket;
-                    break;
+            int new_socket;
+            struct sockaddr_in client_addr;
+            socklen_t addrlen = sizeof(client_addr);
+
+            new_socket = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
+            if (new_socket >= 0) {
+                ClientSession *session = create_session(new_socket);
+                if (!session) {
+                    close(new_socket);
                 }
             }
         }
 
-        // --- 3. Gérer les paquets reçus des clients connectés ---
         for (int i = 0; i < MAX_CLIENTS; i++) {
-            sd = client_socket[i];
-
-            if (FD_ISSET(sd, &readfds)) {
-                PacketHeader header;
-                // Lecture de l'entête pour connaître la taille totale du message
-                int valread = read(sd, &header, sizeof(PacketHeader));
-                if (valread <= 0) {
-                    // Déconnexion détectée
-                    printf("Client déconnecté : fd %d\n", sd);
-                    close(sd);
-                    client_socket[i] = 0;
-                } else {
-                    // Lecture du corps (payload) si nécessaire
-                    char payload[BUFFER_SIZE];
-                    int payload_len = header.length - sizeof(PacketHeader);
-                    if (payload_len > 0 && payload_len < BUFFER_SIZE) {
-                        read(sd, payload, payload_len);
-                    }
-                    // Envoi vers les services via IPC
-                    route_packet(&header, payload, sd);
-                }
+            if (!sessions[i].in_use || sessions[i].tcp_fd <= 0) {
+                continue;
             }
+            if (!FD_ISSET(sessions[i].tcp_fd, &readfds)) {
+                continue;
+            }
+
+            PacketHeader header;
+            char payload[BUFFER_SIZE];
+            memset(payload, 0, sizeof(payload));
+
+            if (recv_all(sessions[i].tcp_fd, &header, sizeof(header)) == -1) {
+                destroy_session(&sessions[i]);
+                continue;
+            }
+
+            if (header.length < sizeof(PacketHeader) || header.length > BUFFER_SIZE) {
+                destroy_session(&sessions[i]);
+                continue;
+            }
+
+            size_t payload_len = header.length - sizeof(PacketHeader);
+            if (payload_len > 0 && recv_all(sessions[i].tcp_fd, payload, payload_len) == -1) {
+                destroy_session(&sessions[i]);
+                continue;
+            }
+
+            route_packet(&sessions[i], &header, payload);
         }
     }
 }
