@@ -10,13 +10,15 @@
 #include "ipc_utils.h"
 #include "ipc_keys.h"
 
-#define NUM_SERVICES 4
+#define NUM_SERVICES 6
 
 pid_t child_pids[NUM_SERVICES];
 const char* service_names[NUM_SERVICES] = {
     "auth_app",
     "matchmaker_app",
     "gameworker_app",
+    "tournament_app",
+    "storage_app",
     "gateway_process"
 };
 
@@ -54,7 +56,7 @@ void launch_service(int index, const char* path) {
     if (pid == 0) {
         // Processus enfant
         printf("[Server Main] Lancement de %s...\n", path);
-        if (index == 3) {
+        if (index == 5) {
             // Le gateway est une fonction, pas un binaire séparé (actuellement)
             start_gateway();
             exit(0);
@@ -85,6 +87,8 @@ int main() {
     system("pkill -TERM auth_app > /dev/null 2>&1");
     system("pkill -TERM matchmaker_app > /dev/null 2>&1");
     system("pkill -TERM gameworker_app > /dev/null 2>&1");
+    system("pkill -TERM tournament_app > /dev/null 2>&1");
+    system("pkill -TERM storage_app > /dev/null 2>&1");
     
     // Création préventive du fichier pour ftok s'il n'existe pas
     int fd = open(GLOBAL_MSG_QUEUE_PATH, O_CREAT | O_RDWR, 0666);
@@ -105,11 +109,13 @@ int main() {
     launch_service(0, "./auth_app");
     launch_service(1, "./matchmaker_app");
     launch_service(2, "./gameworker_app");
+    launch_service(3, "./tournament_app");
+    launch_service(4, "./storage_app");
     
     // Petite pause pour laisser les services s'initialiser
     sleep(1);
     
-    launch_service(3, "gateway_process");
+    launch_service(5, "gateway_process");
 
     printf("[Server Main] Tous les services sont lancés. Appuyez sur Ctrl+C pour arrêter le serveur.\n");
 

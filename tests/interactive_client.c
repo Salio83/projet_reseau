@@ -149,6 +149,20 @@ static void handle_packet(PacketHeader *header, const char *payload) {
             printf("\n[Serveur] Erreur %u: %s\n> ", error->code, error->message);
             break;
         }
+        case PACKET_TOURNAMENT_CREATE_RESP: {
+            const TournamentCreateResp *resp = (const TournamentCreateResp *)payload;
+            printf("\n[Serveur] Tournoi cree avec succes. ID: %u\n> ", resp->tournament_id);
+            break;
+        }
+        case PACKET_TOURNAMENT_JOIN_RESP: {
+            const TournamentJoinResp *resp = (const TournamentJoinResp *)payload;
+            if (resp->status) {
+                printf("\n[Serveur] Rejoint le tournoi avec succes.\n> ");
+            } else {
+                printf("\n[Serveur] Echec rejoindre le tournoi: %s\n> ", resp->message);
+            }
+            break;
+        }
         default:
             printf("\n[Serveur] Paquet reçu: %u\n> ", header->type);
             break;
@@ -334,6 +348,28 @@ int main(void) {
             strncpy(chat.message, message, sizeof(chat.message) - 1);
             send(tcp_sock, &header, sizeof(header), 0);
             send(tcp_sock, &chat, sizeof(chat), 0);
+        } else if (strcmp(cmd, "tourney_create") == 0) {
+            char *max_str = strtok(NULL, " ");
+            if (!max_str) {
+                printf("Usage: tourney_create <max_players>\n");
+                continue;
+            }
+            PacketHeader header = {PACKET_TOURNAMENT_CREATE_REQ, PACKET_SIZE(TournamentCreateReq), session_id};
+            TournamentCreateReq req;
+            req.max_players = (uint8_t)atoi(max_str);
+            send(tcp_sock, &header, sizeof(header), 0);
+            send(tcp_sock, &req, sizeof(req), 0);
+        } else if (strcmp(cmd, "tourney_join") == 0) {
+            char *id_str = strtok(NULL, " ");
+            if (!id_str) {
+                printf("Usage: tourney_join <tournament_id>\n");
+                continue;
+            }
+            PacketHeader header = {PACKET_TOURNAMENT_JOIN_REQ, PACKET_SIZE(TournamentJoinReq), session_id};
+            TournamentJoinReq req;
+            req.tournament_id = (uint32_t)atoi(id_str);
+            send(tcp_sock, &header, sizeof(header), 0);
+            send(tcp_sock, &req, sizeof(req), 0);
         }
     }
 

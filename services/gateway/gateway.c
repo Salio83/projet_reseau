@@ -213,6 +213,15 @@ static void route_packet(ClientSession *session, PacketHeader *header, const cha
             target_type = MSG_TYPE_GAMEWORKER;
             break;
         }
+        case PACKET_TOURNAMENT_CREATE_REQ:
+        case PACKET_TOURNAMENT_LIST_REQ:
+        case PACKET_TOURNAMENT_JOIN_REQ:
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            if (payload_len > 0) {
+                memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
+            }
+            target_type = MSG_TYPE_TOURNAMENT;
+            break;
         default:
             send_packet_error(session, 400, "Type de paquet inconnu.");
             return;
