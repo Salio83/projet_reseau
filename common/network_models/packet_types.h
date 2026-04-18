@@ -29,6 +29,7 @@ typedef enum {
     PACKET_CHAT_BROADCAST = 22,
     PACKET_ERROR = 23,
     PACKET_MOVE_ERROR = 24,
+    PACKET_MATCHMAKING_STATUS = 25,
 
     PACKET_GAME_UPDATE_UDP = 50,
 
@@ -80,6 +81,11 @@ typedef struct {
     char black_username[MAX_USERNAME_LEN];
     uint32_t tournament_id;
 } GameStarted;
+
+typedef struct {
+    uint32_t queue_size;
+    uint32_t position;
+} MatchmakingStatus;
 
 typedef struct {
     uint32_t game_id;

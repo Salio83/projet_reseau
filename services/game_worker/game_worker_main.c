@@ -91,12 +91,6 @@ static void board_to_simple_string(GameState *state, char *buffer) {
     buffer[pos] = '\0';
 }
 
-static uint64_t now_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
-}
-
 static void send_to_gateway(uint32_t session_id, PacketType type, const void *payload, size_t payload_size) {
     int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
     char out_buf[MAX_MSG_SIZE];
@@ -156,51 +150,6 @@ static void broadcast_update(const GameRoom *room, const PlayerMove *move) {
     for (int i = 0; i < room->spectator_count; i++) {
         send_to_gateway(room->spectators[i].session_id, PACKET_GAME_UPDATE_UDP, &update, sizeof(update));
     }
-}
-
-static const char *find_author_name(const GameRoom *room, uint32_t session_id) {
-    if (room->player_white == session_id) {
-        return room->white_name;
-    }
-    if (room->player_black == session_id) {
-        return room->black_name;
-    }
-    for (int i = 0; i < room->spectator_count; i++) {
-        if (room->spectators[i].session_id == session_id) {
-            return room->spectators[i].username;
-        }
-    }
-    return "unknown";
-}
-
-static void broadcast_chat(const GameRoom *room, uint32_t author_session_id, const char *message) {
-    ChatBroadcast broadcast;
-    memset(&broadcast, 0, sizeof(broadcast));
-    broadcast.room_id = room->room_id;
-    broadcast.author_session_id = author_session_id;
-    broadcast.timestamp_ms = now_ms();
-    strncpy(broadcast.author_name, find_author_name(room, author_session_id),
-            sizeof(broadcast.author_name) - 1);
-    strncpy(broadcast.message, message, sizeof(broadcast.message) - 1);
-
-    send_to_gateway(room->player_white, PACKET_CHAT_BROADCAST, &broadcast, sizeof(broadcast));
-    send_to_gateway(room->player_black, PACKET_CHAT_BROADCAST, &broadcast, sizeof(broadcast));
-    for (int i = 0; i < room->spectator_count; i++) {
-        send_to_gateway(room->spectators[i].session_id, PACKET_CHAT_BROADCAST, &broadcast,
-                        sizeof(broadcast));
-    }
-}
-
-static int room_contains_session(const GameRoom *room, uint32_t session_id) {
-    if (room->player_white == session_id || room->player_black == session_id) {
-        return 1;
-    }
-    for (int i = 0; i < room->spectator_count; i++) {
-        if (room->spectators[i].session_id == session_id) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 static void remove_spectator(GameRoom *room, uint32_t session_id) {
@@ -390,26 +339,6 @@ static void handle_move(uint32_t session_id, PlayerMove *move) {
     }
 }
 
-static void handle_chat(uint32_t session_id, ChatMessage *message) {
-    int index = find_room_index(message->room_id);
-    if (index == -1) {
-        send_error(session_id, 404, "Salon introuvable.");
-        return;
-    }
-
-    GameRoom *room = &rooms[index];
-    if (!room_contains_session(room, session_id)) {
-        send_error(session_id, 403, "Non autorisé dans ce salon.");
-        return;
-    }
-    if (message->message[0] == '\0') {
-        send_error(session_id, 400, "Message vide.");
-        return;
-    }
-
-    broadcast_chat(room, session_id, message->message);
-}
-
 static void handle_disconnect(PacketHeader *header, ClientDisconnected *disconnected) {
     (void)disconnected;
     GameRoom *room = find_room_for_session(header->session_id);
@@ -479,9 +408,6 @@ int main(void) {
                 break;
             case PACKET_PLAYER_MOVE:
                 handle_move(header->session_id, (PlayerMove *)payload);
-                break;
-            case PACKET_CHAT_MSG:
-                handle_chat(header->session_id, (ChatMessage *)payload);
                 break;
             case PACKET_CLIENT_DISCONNECTED:
                 handle_disconnect(header, (ClientDisconnected *)payload);

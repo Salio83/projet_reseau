@@ -43,6 +43,9 @@ typedef struct {
     char username[MAX_USERNAME_LEN];
     char status_msg[128];
     ActiveGamesResponse active_games;
+    int is_in_queue;
+    uint32_t queue_size;
+    uint32_t queue_pos;
     char chat_lines[MAX_CHAT_LINES][320];
     int chat_count;
     char chat_input[MAX_CHAT_MESSAGE_LEN];
@@ -149,9 +152,21 @@ static void handle_packet_locked(ClientApp *app, PacketHeader *header, const cha
             app->is_spectator = 0;
             app->screen = STATE_PLAYING;
             app->chat_count = 0;
+            app->is_in_queue = 0;
+            app->queue_size = 0;
+            app->queue_pos = 0;
             game_reset(&app->display_state);
             snprintf(app->status_msg, sizeof(app->status_msg), "Partie %u contre %s.",
                      started->room_id, started->opponent_username);
+            break;
+        }
+        case PACKET_MATCHMAKING_STATUS: {
+            const MatchmakingStatus *ms = (const MatchmakingStatus *)payload;
+            app->is_in_queue = 1;
+            app->queue_size = ms->queue_size;
+            app->queue_pos = ms->position;
+            snprintf(app->status_msg, sizeof(app->status_msg), "En file d'attente... (%u/%u)",
+                     app->queue_pos, app->queue_size);
             break;
         }
         case PACKET_GAME_SNAPSHOT: {
@@ -446,30 +461,43 @@ static void render_connect_screen(ClientApp *app, char *input_buf, int *input_le
 static void render_lobby_screen(ClientApp *app) {
     ActiveGamesResponse games;
     char status_msg[128];
+    int in_queue;
+    uint32_t q_size, q_pos;
 
     pthread_mutex_lock(&app->lock);
     games = app->active_games;
     strncpy(status_msg, app->status_msg, sizeof(status_msg) - 1);
+    in_queue = app->is_in_queue;
+    q_size = app->queue_size;
+    q_pos = app->queue_pos;
     pthread_mutex_unlock(&app->lock);
 
     ClearBackground((Color){20, 28, 24, 255});
     DrawText("LOBBY", SCREEN_W / 2 - 70, 60, 54, GREEN);
     DrawText(TextFormat("Connecte en tant que %s", app->username), 60, 130, 24, LIGHTGRAY);
 
-    Rectangle join_btn = {60, 180, 260, 56};
-    Rectangle list_btn = {340, 180, 220, 56};
     Vector2 mouse = GetMousePosition();
 
-    DrawRectangleRec(join_btn, CheckCollisionPointRec(mouse, join_btn) ? DARKGREEN : (Color){25, 70, 35, 255});
-    DrawRectangleRec(list_btn, CheckCollisionPointRec(mouse, list_btn) ? DARKBLUE : (Color){30, 45, 80, 255});
-    DrawText("REJOINDRE UNE PARTIE", 75, 197, 24, WHITE);
-    DrawText("RAFRAICHIR", 382, 197, 24, WHITE);
+    if (in_queue) {
+        DrawRectangle(60, 170, 500, 80, (Color){40, 40, 60, 255});
+        DrawRectangleLines(60, 170, 500, 80, SKYBLUE);
+        DrawText("RECHERCHE DE PARTIE EN COURS...", 80, 185, 20, SKYBLUE);
+        DrawText(TextFormat("Position: %u | Total dans la file: %u", q_pos, q_size), 80, 215, 22, WHITE);
+    } else {
+        Rectangle join_btn = {60, 180, 260, 56};
+        Rectangle list_btn = {340, 180, 220, 56};
 
-    if (CheckCollisionPointRec(mouse, join_btn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        send_join(app);
-    }
-    if (CheckCollisionPointRec(mouse, list_btn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        send_list(app);
+        DrawRectangleRec(join_btn, CheckCollisionPointRec(mouse, join_btn) ? DARKGREEN : (Color){25, 70, 35, 255});
+        DrawRectangleRec(list_btn, CheckCollisionPointRec(mouse, list_btn) ? DARKBLUE : (Color){30, 45, 80, 255});
+        DrawText("REJOINDRE UNE PARTIE", 75, 197, 24, WHITE);
+        DrawText("RAFRAICHIR", 382, 197, 24, WHITE);
+
+        if (CheckCollisionPointRec(mouse, join_btn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            send_join(app);
+        }
+        if (CheckCollisionPointRec(mouse, list_btn) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            send_list(app);
+        }
     }
 
     DrawText("Salons actifs", 60, 270, 28, GOLD);

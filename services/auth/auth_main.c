@@ -9,44 +9,64 @@
 #include "../../common/network_models/packet_types.h"
 
 int main(void) {
-    printf("[Auth Service] Démarrage...\n");
+  printf("[Auth Service] Démarrage...\n");
 
-    int fd = open(GLOBAL_MSG_QUEUE_PATH, O_CREAT | O_RDWR, 0666);
-    if (fd != -1) {
-        close(fd);
+  int fd = open(GLOBAL_MSG_QUEUE_PATH, O_CREAT | O_RDWR, 0666);
+  if (fd != -1) {
+    close(fd);
+  }
+
+  int global_mq =
+      ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+  if (global_mq == -1) {
+    perror("ipc_msg_get failed");
+    exit(1);
+  }
+
+  char msg_buffer[MAX_MSG_SIZE];
+
+  // lecture sur la file de message, si un paquet de type "MSG_TYPE_AUTH" non
+  // vide est reçu, on extrait la requete (header) et on envoies un header de
+  // type "PACKET_AUTH_OK" afin de signaler que la demande de connection est
+  // acceptée, le gateway s'occupera de cette réponse et le transmettera au
+  // client
+  while (1) {
+    int nbytes = ipc_msg_receive(global_mq, msg_buffer, sizeof(msg_buffer),
+                                 MSG_TYPE_AUTH);
+    if (nbytes < 0) {
+      // Si la file IPC a été supprimée ou qu'une erreur fatale survient, on
+      // quitte.
+      if (errno == EIDRM || errno == EINVAL) {
+        fprintf(
+            stderr,
+            "[Auth Service] File de message détruite ou invalide. Arrêt.\n");
+        break;
+      }
+      perror("[Auth Service] Erreur de lecture IPC");
+      sleep(1); // Évite de saturer le CPU en cas d'erreur transitoire
+      continue;
+    } else if (nbytes == 0) {
+      continue;
     }
 
-    int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
-    if (global_mq == -1) {
-        perror("ipc_msg_get failed");
-        exit(1);
-    }
+    PacketHeader *header = (PacketHeader *)msg_buffer;
+    AuthRequest *request = (AuthRequest *)(msg_buffer + sizeof(PacketHeader));
 
-    char msg_buffer[MAX_MSG_SIZE];
+    char out_buf[MAX_MSG_SIZE];
+    PacketHeader *out_header = (PacketHeader *)out_buf;
+    AuthOk *response = (AuthOk *)(out_buf + sizeof(PacketHeader));
 
-    while (1) {
-        int nbytes = ipc_msg_receive(global_mq, msg_buffer, sizeof(msg_buffer), MSG_TYPE_AUTH);
-        if (nbytes <= 0) {
-            continue;
-        }
+    memset(out_buf, 0, sizeof(out_buf));
+    out_header->type = PACKET_AUTH_OK;
+    out_header->length = sizeof(PacketHeader) + sizeof(AuthOk);
+    out_header->session_id = header->session_id;
 
-        PacketHeader *header = (PacketHeader *)msg_buffer;
-        AuthRequest *request = (AuthRequest *)(msg_buffer + sizeof(PacketHeader));
+    response->session_id = header->session_id;
+    strncpy(response->username, request->username,
+            sizeof(response->username) - 1);
 
-        char out_buf[MAX_MSG_SIZE];
-        PacketHeader *out_header = (PacketHeader *)out_buf;
-        AuthOk *response = (AuthOk *)(out_buf + sizeof(PacketHeader));
+    ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_GATEWAY);
+  }
 
-        memset(out_buf, 0, sizeof(out_buf));
-        out_header->type = PACKET_AUTH_OK;
-        out_header->length = sizeof(PacketHeader) + sizeof(AuthOk);
-        out_header->session_id = header->session_id;
-
-        response->session_id = header->session_id;
-        strncpy(response->username, request->username, sizeof(response->username) - 1);
-
-        ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_GATEWAY);
-    }
-
-    return 0;
+  return 0;
 }

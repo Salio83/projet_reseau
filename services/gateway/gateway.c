@@ -138,6 +138,7 @@ static void notify_disconnect(const ClientSession *session) {
     payload->role = session->role;
 
     ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_GAMEWORKER);
+    ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_CHAT);
 }
 
 static void destroy_session(ClientSession *session) {
@@ -189,7 +190,6 @@ static void route_packet(ClientSession *session, PacketHeader *header, const cha
             break;
         }
         case PACKET_PLAYER_MOVE:
-        case PACKET_CHAT_MSG:
         case PACKET_LIST_ACTIVE_GAMES_REQ:
         case PACKET_SPECTATE_LEAVE_REQ:
             memcpy(out_buf, header, sizeof(PacketHeader));
@@ -197,6 +197,13 @@ static void route_packet(ClientSession *session, PacketHeader *header, const cha
                 memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
             }
             target_type = MSG_TYPE_GAMEWORKER;
+            break;
+        case PACKET_CHAT_MSG:
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            if (payload_len > 0) {
+                memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
+            }
+            target_type = MSG_TYPE_CHAT;
             break;
         case PACKET_SPECTATE_JOIN_REQ: {
             SpectateJoinRequest request;
@@ -288,11 +295,14 @@ static void handle_service_responses(void) {
             GameStarted *started = (GameStarted *)(msg_buffer + sizeof(PacketHeader));
             session->current_room_id = started->room_id;
             session->role = ROOM_ROLE_PLAYER;
+            ipc_msg_send(global_mq, msg_buffer, header->length, MSG_TYPE_CHAT);
         } else if (header->type == PACKET_SPECTATE_JOIN_OK) {
             SpectateStatus *status = (SpectateStatus *)(msg_buffer + sizeof(PacketHeader));
             session->current_room_id = status->room_id;
             session->role = ROOM_ROLE_SPECTATOR;
+            ipc_msg_send(global_mq, msg_buffer, header->length, MSG_TYPE_CHAT);
         } else if (header->type == PACKET_SPECTATE_LEAVE_OK) {
+            ipc_msg_send(global_mq, msg_buffer, header->length, MSG_TYPE_CHAT);
             session->current_room_id = 0;
             session->role = ROOM_ROLE_NONE;
         }

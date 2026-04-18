@@ -54,6 +54,23 @@ int main(void) {
                 sizeof(waiting_players[waiting_count].username) - 1);
         waiting_count++;
 
+        // Envoyer le statut à tous ceux qui attendent (y compris le nouveau venu)
+        for (int i = 0; i < waiting_count; i++) {
+            char out_buf[MAX_MSG_SIZE];
+            PacketHeader *out_header = (PacketHeader *)out_buf;
+            MatchmakingStatus *status = (MatchmakingStatus *)(out_buf + sizeof(PacketHeader));
+
+            memset(out_buf, 0, sizeof(out_buf));
+            out_header->type = PACKET_MATCHMAKING_STATUS;
+            out_header->length = sizeof(PacketHeader) + sizeof(MatchmakingStatus);
+            out_header->session_id = waiting_players[i].session_id;
+
+            status->queue_size = waiting_count;
+            status->position = i + 1;
+
+            ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_GATEWAY);
+        }
+
         if (waiting_count < 2) {
             continue;
         }
@@ -95,6 +112,23 @@ int main(void) {
         waiting_count -= 2;
         for (int i = 0; i < waiting_count; i++) {
             waiting_players[i] = waiting_players[i + 2];
+        }
+
+        // Envoyer le statut mis à jour aux rescapés s'il y en a
+        for (int i = 0; i < waiting_count; i++) {
+            char out_buf_rem[MAX_MSG_SIZE];
+            PacketHeader *out_header_rem = (PacketHeader *)out_buf_rem;
+            MatchmakingStatus *status_rem = (MatchmakingStatus *)(out_buf_rem + sizeof(PacketHeader));
+
+            memset(out_buf_rem, 0, sizeof(out_buf_rem));
+            out_header_rem->type = PACKET_MATCHMAKING_STATUS;
+            out_header_rem->length = sizeof(PacketHeader) + sizeof(MatchmakingStatus);
+            out_header_rem->session_id = waiting_players[i].session_id;
+
+            status_rem->queue_size = waiting_count;
+            status_rem->position = i + 1;
+
+            ipc_msg_send(global_mq, out_buf_rem, out_header_rem->length, MSG_TYPE_GATEWAY);
         }
     }
 

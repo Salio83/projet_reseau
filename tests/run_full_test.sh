@@ -17,6 +17,9 @@ killall server_app auth_app matchmaker_app gameworker_app 2>/dev/null
 echo "[1/4] Compilation..."
 make all
 
+# Création du fichier pour ftok s'il n'existe pas
+touch /tmp/global_mq
+
 # Démarrage des services
 echo "[2/4] Lancement des services..."
 $AUTH > /dev/null &
