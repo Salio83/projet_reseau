@@ -64,6 +64,20 @@ static void send_to_gateway(uint32_t session_id, PacketType type, const void *pa
     ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_GATEWAY);
 }
 
+static void broadcast_tournament_state(Tournament *t) {
+    TournamentStatePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.tournament_id = t->id;
+    pkt.joined = (uint8_t)t->player_count;
+    pkt.max = (uint8_t)t->max_players;
+    pkt.status = (uint8_t)(t->active == 2 ? 1 : 0); // 0=Wait, 1=Running
+    pkt.winner_name[0] = '\0';
+
+    for (int i = 0; i < t->player_count; i++) {
+        send_to_gateway(t->players[i].session_id, PACKET_TOURNAMENT_STATE, &pkt, sizeof(pkt));
+    }
+}
+
 static void send_start_room(Tournament *t, int match_index) {
     TMatch *m = &t->matches[match_index];
     if (m->started || m->winner != 0 || m->p1 == 0 || m->p2 == 0) return;
@@ -114,7 +128,22 @@ static void advance_winner(Tournament *t, int match_index, uint32_t winner_id, c
     
     if (m->next_match_idx == -1) {
         printf("[Tournament] Tournament %d finished! Winner: %s\n", t->id, winner_name);
-        t->active = 0; // Terminé
+        
+        // Notification de VICTOIRE (status=2)
+        TournamentStatePacket pkt;
+        memset(&pkt, 0, sizeof(pkt));
+        pkt.tournament_id = t->id;
+        pkt.joined = (uint8_t)t->player_count;
+        pkt.max = (uint8_t)t->max_players;
+        pkt.status = 2; // Finished
+        strncpy(pkt.winner_name, winner_name, MAX_USERNAME_LEN - 1);
+
+        for (int i = 0; i < t->player_count; i++) {
+            send_to_gateway(t->players[i].session_id, PACKET_TOURNAMENT_STATE, &pkt, sizeof(pkt));
+        }
+
+        // Nettoyage complet
+        memset(t, 0, sizeof(Tournament));
         return;
     }
 
@@ -208,13 +237,24 @@ static void handle_create(PacketHeader *header, TournamentCreateReq *req) {
     }
 }
 
-static void handle_join(PacketHeader *header, TournamentJoinReq *req, const char* username) {
+static void handle_join(PacketHeader *header, TournamentJoinReq *req) {
     TournamentJoinResp resp;
     memset(&resp, 0, sizeof(resp));
 
     for (int i = 0; i < MAX_TOURNAMENTS; i++) {
-        if (tournaments[i].id == req->tournament_id && tournaments[i].active == 1) {
+        if (tournaments[i].id == req->tournament_id) {
             Tournament *t = &tournaments[i];
+
+            if (t->active == 2) {
+                resp.status = 0;
+                strcpy(resp.message, "Le tournoi a deja commence.");
+                send_to_gateway(header->session_id, PACKET_TOURNAMENT_JOIN_RESP, &resp, sizeof(resp));
+                return;
+            }
+
+            if (t->active != 1) {
+                continue;
+            }
             
             // Verifier duplicat
             for (int j = 0; j < t->player_count; j++) {
@@ -233,12 +273,14 @@ static void handle_join(PacketHeader *header, TournamentJoinReq *req, const char
             }
 
             t->players[t->player_count].session_id = header->session_id;
-            strncpy(t->players[t->player_count].username, username, MAX_USERNAME_LEN - 1);
+            strncpy(t->players[t->player_count].username, req->username, MAX_USERNAME_LEN - 1);
             t->player_count++;
 
             resp.status = 1;
             send_to_gateway(header->session_id, PACKET_TOURNAMENT_JOIN_RESP, &resp, sizeof(resp));
-            printf("[Tournament] Player %s joined %d (%d/%d)\n", username, t->id, t->player_count, t->max_players);
+            printf("[Tournament] Player %s joined %d (%d/%d)\n", req->username, t->id, t->player_count, t->max_players);
+
+            broadcast_tournament_state(t);
 
             if (t->player_count == t->max_players) {
                 t->active = 2; // running
@@ -251,6 +293,23 @@ static void handle_join(PacketHeader *header, TournamentJoinReq *req, const char
     resp.status = 0;
     strcpy(resp.message, "Tournoi introuvable ou ferme.");
     send_to_gateway(header->session_id, PACKET_TOURNAMENT_JOIN_RESP, &resp, sizeof(resp));
+}
+
+static void handle_list(PacketHeader *header) {
+    TournamentListResp resp;
+    memset(&resp, 0, sizeof(resp));
+    
+    for (int i = 0; i < MAX_TOURNAMENTS; i++) {
+        // Renvoie uniquement les tournois au statut "waiting" (active == 1)
+        if (tournaments[i].active == 1 && resp.tournament_count < 10) {
+            resp.tournaments[resp.tournament_count].tournament_id = tournaments[i].id;
+            resp.tournaments[resp.tournament_count].player_count = (uint8_t)tournaments[i].player_count;
+            resp.tournaments[resp.tournament_count].max_players = (uint8_t)tournaments[i].max_players;
+            resp.tournament_count++;
+        }
+    }
+    
+    send_to_gateway(header->session_id, PACKET_TOURNAMENT_LIST_RESP, &resp, sizeof(resp));
 }
 
 static void handle_game_finished(GameFinished *fin) {
@@ -296,14 +355,10 @@ int main(void) {
                 handle_create(header, (TournamentCreateReq *)payload);
                 break;
             case PACKET_TOURNAMENT_JOIN_REQ:
-                // Pour récupérer le nom on doit gruger ou obliger le client à l'envoyer.
-                // Dans matchmaker on avait le username dans le paquet req.
-                // Ici on suppose le username = "PlayerX"
-                {
-                    char defaultName[32];
-                    snprintf(defaultName, sizeof(defaultName), "Player_%u", header->session_id);
-                    handle_join(header, (TournamentJoinReq *)payload, defaultName);
-                }
+                handle_join(header, (TournamentJoinReq *)payload);
+                break;
+            case PACKET_TOURNAMENT_LIST_REQ:
+                handle_list(header);
                 break;
             case PACKET_GAME_FINISHED:
                 handle_game_finished((GameFinished *)payload);

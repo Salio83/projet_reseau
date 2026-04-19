@@ -343,6 +343,52 @@ static void handle_move(uint32_t session_id, PlayerMove *move) {
     if (room->state->checkmate || room->state->stalemate) {
         int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
         
+        // Déterminer le résultat
+        uint8_t result;
+        const char *winner_name;
+        if (room->state->checkmate) {
+            // current_player est le joueur MATE (celui qui doit jouer mais ne peut pas)
+            // Donc le gagnant est l'autre
+            if (room->state->current_player == PLAYER_WHITE) {
+                result = 2; // Black wins
+                winner_name = room->black_name;
+            } else {
+                result = 1; // White wins
+                winner_name = room->white_name;
+            }
+        } else {
+            result = 0; // Draw (stalemate)
+            winner_name = "Egalite";
+        }
+
+        // Notifier les joueurs et spectateurs via PACKET_GAME_OVER
+        {
+            char go_buf[MAX_MSG_SIZE];
+            PacketHeader *go_header = (PacketHeader *)go_buf;
+            GameOver *go = (GameOver *)(go_buf + sizeof(PacketHeader));
+            memset(go_buf, 0, sizeof(go_buf));
+
+            go_header->type = PACKET_GAME_OVER;
+            go_header->length = sizeof(PacketHeader) + sizeof(GameOver);
+            go->room_id = room->room_id;
+            go->result = result;
+            strncpy(go->winner_name, winner_name, sizeof(go->winner_name) - 1);
+
+            // Envoyer au joueur blanc
+            go_header->session_id = room->player_white;
+            ipc_msg_send(global_mq, go_buf, go_header->length, MSG_TYPE_GATEWAY);
+
+            // Envoyer au joueur noir
+            go_header->session_id = room->player_black;
+            ipc_msg_send(global_mq, go_buf, go_header->length, MSG_TYPE_GATEWAY);
+
+            // Envoyer aux spectateurs
+            for (int s = 0; s < room->spectator_count; s++) {
+                go_header->session_id = room->spectators[s].session_id;
+                ipc_msg_send(global_mq, go_buf, go_header->length, MSG_TYPE_GATEWAY);
+            }
+        }
+
         // Envoi pour l'historique et les statistiques
         char hist_buf[MAX_MSG_SIZE];
         PacketHeader *hist_header = (PacketHeader *)hist_buf;
@@ -355,11 +401,7 @@ static void handle_move(uint32_t session_id, PlayerMove *move) {
         strncpy(hist_req->white_name, room->white_name, sizeof(hist_req->white_name) - 1);
         strncpy(hist_req->black_name, room->black_name, sizeof(hist_req->black_name) - 1);
         hist_req->move_count = room->state->move_count;
-        if (room->state->checkmate) {
-            hist_req->result = (room->state->current_player == PLAYER_WHITE) ? 2 : 1; // if white is checked, black (2) wins
-        } else {
-            hist_req->result = 0; // draw
-        }
+        hist_req->result = result;
         ipc_msg_send(global_mq, hist_buf, hist_header->length, MSG_TYPE_STORAGE);
 
         // Si tournoi, on notifie le Tournoi
@@ -373,16 +415,7 @@ static void handle_move(uint32_t session_id, PlayerMove *move) {
             out_header->length = sizeof(PacketHeader) + sizeof(GameFinished);
             
             finished->tournament_id = room->tournament_id;
-            
-            if (room->state->checkmate) {
-                // Le joueur actuel vient de jouer et de mettre échec et mat, attention la logique checkmate c'est current_player maté.
-                // Donc si current_player == white, black a gagné.  Mais dans `handle_move`, on a déjà joué le coup.
-                // `session_id` est le joueur qui a FAIT le coup.
-                finished->winner_session_id = session_id;
-            } else {
-                // Pat : arbitrairement on qualifie les Noirs (ou autre décision)
-                finished->winner_session_id = room->player_black;
-            }
+            finished->winner_session_id = session_id;
             
             ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_TOURNAMENT);
         }

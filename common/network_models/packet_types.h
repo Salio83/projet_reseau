@@ -40,6 +40,7 @@ typedef enum {
     PACKET_TOURNAMENT_JOIN_RESP = 65,
     PACKET_TOURNAMENT_STATE = 66,
     PACKET_GAME_FINISHED = 67,
+    PACKET_GAME_OVER = 68,
     PACKET_SAVE_HISTORY = 70
 } PacketType;
 
@@ -177,7 +178,27 @@ typedef struct {
 
 typedef struct {
     uint32_t tournament_id;
+    char username[MAX_USERNAME_LEN];
 } TournamentJoinReq;
+
+typedef struct {
+    uint32_t tournament_id;
+    uint8_t player_count;
+    uint8_t max_players;
+} ActiveTournamentInfo;
+
+typedef struct {
+    uint16_t tournament_count;
+    ActiveTournamentInfo tournaments[10];
+} TournamentListResp;
+
+typedef struct {
+    uint32_t tournament_id;
+    uint8_t joined;
+    uint8_t max;
+    uint8_t status; // 0=Wait, 1=Running, 2=Finished
+    char winner_name[MAX_USERNAME_LEN];
+} TournamentStatePacket;
 
 typedef struct {
     uint16_t status; // 1 = ok, 0 = ko
@@ -196,5 +217,11 @@ typedef struct {
     uint8_t result; // 1=white, 2=black, 0=draw
     uint16_t move_count;
 } SaveHistoryReq;
+
+typedef struct {
+    uint32_t room_id;
+    uint8_t result;  // 1=white wins, 2=black wins, 0=draw(stalemate)
+    char winner_name[MAX_USERNAME_LEN];
+} GameOver;
 
 #endif // PACKET_TYPES_H

@@ -163,6 +163,38 @@ static void handle_packet(PacketHeader *header, const char *payload) {
             }
             break;
         }
+        case PACKET_TOURNAMENT_LIST_RESP: {
+            const TournamentListResp *resp = (const TournamentListResp *)payload;
+            printf("\n[Serveur] Tournois en attente (%u)\n", resp->tournament_count);
+            for (uint16_t i = 0; i < resp->tournament_count; i++) {
+                printf("  [Tournoi ID %u] Joueurs: %u/%u\n", 
+                       resp->tournaments[i].tournament_id,
+                       resp->tournaments[i].player_count,
+                       resp->tournaments[i].max_players);
+            }
+            printf("> ");
+            break;
+        }
+        case PACKET_GAME_OVER: {
+            const GameOver *go = (const GameOver *)payload;
+            if (go->result == 1) {
+                printf("\n========================================\n");
+                printf("  ECHEC ET MAT ! Les BLANCS gagnent !\n");
+                printf("  Vainqueur : %s\n", go->winner_name);
+                printf("========================================\n> ");
+            } else if (go->result == 2) {
+                printf("\n========================================\n");
+                printf("  ECHEC ET MAT ! Les NOIRS gagnent !\n");
+                printf("  Vainqueur : %s\n", go->winner_name);
+                printf("========================================\n> ");
+            } else {
+                printf("\n========================================\n");
+                printf("  PAT ! Match nul.\n");
+                printf("========================================\n> ");
+            }
+            current_room_id = 0;
+            break;
+        }
         default:
             printf("\n[Serveur] Paquet reçu: %u\n> ", header->type);
             break;
@@ -229,6 +261,9 @@ static void print_help(void) {
     printf("  leave             : quitter le mode spectateur\n");
     printf("  move <from> <to>  : jouer un coup\n");
     printf("  chat <texte>      : envoyer un message au salon courant\n");
+    printf("  tourney_create <max_players>: creer un tournoi\n");
+    printf("  tourney_join <id>           : rejoindre un tournoi\n");
+    printf("  tourney_list                : lister les tournois en attente\n");
     printf("  help              : afficher l'aide\n");
     printf("  quit              : quitter\n");
 }
@@ -367,9 +402,14 @@ int main(void) {
             }
             PacketHeader header = {PACKET_TOURNAMENT_JOIN_REQ, PACKET_SIZE(TournamentJoinReq), session_id};
             TournamentJoinReq req;
+            memset(&req, 0, sizeof(req));
             req.tournament_id = (uint32_t)atoi(id_str);
+            strncpy(req.username, current_username, sizeof(req.username) - 1);
             send(tcp_sock, &header, sizeof(header), 0);
             send(tcp_sock, &req, sizeof(req), 0);
+        } else if (strcmp(cmd, "tourney_list") == 0) {
+            PacketHeader header = {PACKET_TOURNAMENT_LIST_REQ, sizeof(PacketHeader), session_id};
+            send(tcp_sock, &header, sizeof(header), 0);
         }
     }
 

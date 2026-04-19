@@ -2,8 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "raylib.h"
-
 static bool is_in_bounds(int row, int col) {
     return row >= 0 && row < 8 && col >= 0 && col < 8;
 }

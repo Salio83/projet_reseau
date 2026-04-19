@@ -215,13 +215,25 @@ static void route_packet(ClientSession *session, PacketHeader *header, const cha
         }
         case PACKET_TOURNAMENT_CREATE_REQ:
         case PACKET_TOURNAMENT_LIST_REQ:
-        case PACKET_TOURNAMENT_JOIN_REQ:
             memcpy(out_buf, header, sizeof(PacketHeader));
             if (payload_len > 0) {
                 memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
             }
             target_type = MSG_TYPE_TOURNAMENT;
             break;
+        case PACKET_TOURNAMENT_JOIN_REQ: {
+            TournamentJoinReq request;
+            memset(&request, 0, sizeof(request));
+            if (payload_len >= sizeof(request.tournament_id)) {
+                memcpy(&request, payload, sizeof(request.tournament_id));
+            }
+            strncpy(request.username, session->username, sizeof(request.username) - 1);
+            header->length = sizeof(PacketHeader) + sizeof(TournamentJoinReq);
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            memcpy(out_buf + sizeof(PacketHeader), &request, sizeof(request));
+            target_type = MSG_TYPE_TOURNAMENT;
+            break;
+        }
         default:
             send_packet_error(session, 400, "Type de paquet inconnu.");
             return;
