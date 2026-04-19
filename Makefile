@@ -13,11 +13,12 @@ SERVER_SRCS = services/server_main.c services/gateway/gateway.c common/ipc_utils
 AUTH_SRCS = services/auth/auth_main.c common/ipc_utils/ipc_utils.c
 MATCHMAKER_SRCS = services/matchmaker/matchmaker_main.c common/ipc_utils/ipc_utils.c
 GAMEWORKER_SRCS = services/game_worker/game_worker_main.c common/ipc_utils/ipc_utils.c common/chess_engine/chess.c
+CHAT_SRCS = services/chat/chat_main.c common/ipc_utils/ipc_utils.c
 TOURNAMENT_SRCS = services/tournament/tournament_main.c common/ipc_utils/ipc_utils.c
 STORAGE_SRCS = services/storage_worker/storage_worker_main.c common/ipc_utils/ipc_utils.c
 
 # Cibles principales
-all: server auth_service matchmaker_service gameworker_service tournament_service storage_service chess chess_gui_client test_client test_suite test_game_flow client_interactive
+all: server auth_service matchmaker_service gameworker_service chat_service tournament_service storage_service chess chess_gui_client test_client test_suite test_game_flow client_interactive
 
 # Compilation du Serveur Unifié
 server: $(SERVER_SRCS)
@@ -38,6 +39,11 @@ matchmaker_service: $(MATCHMAKER_SRCS)
 gameworker_service: $(GAMEWORKER_SRCS)
 	@echo "Compilation du Service GameWorker..."
 	$(CC) $(CFLAGS) $(GAMEWORKER_SRCS) -o gameworker_app
+
+# Compilation du Service Chat
+chat_service: $(CHAT_SRCS)
+	@echo "Compilation du Service Chat..."
+	$(CC) $(CFLAGS) $(CHAT_SRCS) -o chat_app
 
 # Compilation du Service Tournament
 tournament_service: $(TOURNAMENT_SRCS)
@@ -84,7 +90,7 @@ test-full: all
 
 # Nettoyage
 clean:
-	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app tournament_app storage_app test_client test_suite test_game_flow client_interactive gateway
+	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app chat_app tournament_app storage_app test_client test_suite test_game_flow client_interactive gateway
 	rm -rf build/
 
 # Nettoyage manuel des ressources IPC (en cas de plantage)

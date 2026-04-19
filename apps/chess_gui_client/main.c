@@ -45,6 +45,9 @@ typedef struct {
     char username[MAX_USERNAME_LEN];
     char status_msg[128];
     ActiveGamesResponse active_games;
+    int is_in_queue;
+    uint32_t queue_size;
+    uint32_t queue_pos;
     char chat_lines[MAX_CHAT_LINES][320];
     int chat_count;
     char chat_input[MAX_CHAT_MESSAGE_LEN];
@@ -162,9 +165,21 @@ static void handle_packet_locked(ClientApp *app, PacketHeader *header, const cha
             app->is_spectator = 0;
             app->screen = STATE_PLAYING;
             app->chat_count = 0;
+            app->is_in_queue = 0;
+            app->queue_size = 0;
+            app->queue_pos = 0;
             game_reset(&app->display_state);
             snprintf(app->status_msg, sizeof(app->status_msg), "Partie %u contre %s.",
                      started->room_id, started->opponent_username);
+            break;
+        }
+        case PACKET_MATCHMAKING_STATUS: {
+            const MatchmakingStatus *ms = (const MatchmakingStatus *)payload;
+            app->is_in_queue = 1;
+            app->queue_size = ms->queue_size;
+            app->queue_pos = ms->position;
+            snprintf(app->status_msg, sizeof(app->status_msg), "En file d'attente... (%u/%u)",
+                     app->queue_pos, app->queue_size);
             break;
         }
         case PACKET_GAME_SNAPSHOT: {
@@ -580,7 +595,7 @@ static void render_lobby_screen(ClientApp *app) {
         // --- MODE PARTIES ---
         Rectangle join_btn = {60, 200, 260, 56};
         Rectangle list_btn = {340, 200, 220, 56};
-        
+
         DrawRectangleRec(join_btn, CheckCollisionPointRec(mouse, join_btn) ? DARKGREEN : (Color){25, 70, 35, 255});
         DrawRectangleRec(list_btn, CheckCollisionPointRec(mouse, list_btn) ? DARKBLUE : (Color){30, 45, 80, 255});
         DrawText("REJOINDRE UNE PARTIE", 75, 217, 20, WHITE);
@@ -617,18 +632,18 @@ static void render_lobby_screen(ClientApp *app) {
         Rectangle minus_btn = {270, 200, 40, 56};
         Rectangle plus_btn = {350, 200, 40, 56};
         Rectangle refresh_btn = {420, 200, 180, 56};
-        
+
         DrawRectangleRec(create_btn, CheckCollisionPointRec(mouse, create_btn) ? PURPLE : (Color){60, 30, 80, 255});
         DrawText("CREER TOURNOI", 80, 217, 20, WHITE);
-        
+
         DrawRectangleRec(minus_btn, CheckCollisionPointRec(mouse, minus_btn) ? GRAY : DARKGRAY);
         DrawText("-", 285, 215, 30, WHITE);
-        
+
         DrawText(TextFormat("%dj", app->new_tourney_players), 316, 217, 20, WHITE);
-        
+
         DrawRectangleRec(plus_btn, CheckCollisionPointRec(mouse, plus_btn) ? GRAY : DARKGRAY);
         DrawText("+", 362, 215, 30, WHITE);
-        
+
         DrawRectangleRec(refresh_btn, CheckCollisionPointRec(mouse, refresh_btn) ? BLUE : DARKBLUE);
         DrawText("RAFRAICHIR", 450, 217, 20, WHITE);
 
@@ -645,7 +660,7 @@ static void render_lobby_screen(ClientApp *app) {
             int y = 330 + (int)i * 60;
             Rectangle row = {60, (float)y, 640, 50};
             Rectangle join_t_btn = {590, (float)y + 8, 100, 34};
-            
+
             DrawRectangleRec(row, (Color){40, 30, 50, 255});
             DrawRectangleLinesEx(row, 1, GRAY);
             DrawText(TextFormat("Tournoi #%u", tourneys.tournaments[i].tournament_id), 75, y + 14, 20, WHITE);
@@ -814,11 +829,11 @@ static void render_tournament_lobby_screen(ClientApp *app) {
 
     // Fond dégradé sombre (simulation)
     ClearBackground((Color){20, 20, 32, 255});
-    
+
     // Header
     DrawText("SALON DE TOURNOI", SCREEN_W / 2 - 220, 60, 48, PURPLE);
     DrawRectangle(SCREEN_W / 2 - 220, 115, 440, 2, PURPLE);
-    
+
     DrawText(TextFormat("ID DU TOURNOI : #%04u", app->tournament_id), SCREEN_W / 2 - 140, 135, 24, DARKGRAY);
 
     // Boite de Statut Centrale
@@ -835,7 +850,7 @@ static void render_tournament_lobby_screen(ClientApp *app) {
             float progress = (float)joined / (float)max;
             DrawRectangle(SCREEN_W / 2 - 200, 350, 400, 10, DARKGRAY);
             DrawRectangle(SCREEN_W / 2 - 200, 350, (int)(400 * progress), 10, GREEN);
-            
+
             DrawText("Attente de participants supplémentaires...", SCREEN_W / 2 - 180, 380, 20, GOLD);
         } else {
             if (status == 1) {
@@ -860,7 +875,7 @@ static void render_tournament_winner_screen(ClientApp *app) {
     pthread_mutex_unlock(&app->lock);
 
     ClearBackground((Color){20, 15, 30, 255});
-    
+
     DrawText("FIN DU TOURNOI", SCREEN_W / 2 - 200, 100, 50, GOLD);
     DrawRectangle(SCREEN_W / 2 - 220, 160, 440, 4, GOLD);
 

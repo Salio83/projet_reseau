@@ -19,6 +19,9 @@ server_app
 auth_app
 matchmaker_app
 gameworker_app
+tournament_app
+storage_app
+chess_gui_client
 client_interactive
 test_client
 test_suite
