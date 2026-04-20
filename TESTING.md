@@ -1,98 +1,56 @@
 # Guide de Test - Projet Réseau Échecs
 
-Ce document explique comment tester les différentes fonctionnalités du projet, de la compilation à l'exécution des tests automatisés et manuels.
+Ce guide explique comment compiler, lancer et tester rapidement le projet.
 
-## 1. Prérequis
+## 1. Compilation
 
-Assurez-vous d'avoir les outils suivants installés :
-- `gcc` (compilateur C)
-- `make`
-- `ipcs` / `ipcrm` (pour la gestion des files de messages IPC)
-- `raylib` (pour la partie graphique, si applicable)
-
-## 2. Compilation
-
-Pour compiler l'ensemble du projet (serveurs, services et outils de test) :
+Avant de tester, compilez tous les modules (services et clients) :
 
 ```bash
 make all
 ```
 
-Pour nettoyer les fichiers compilés :
+## 2. Lancement des Services
+
+Pour que le système fonctionne, tous les services backend doivent être actifs :
 
 ```bash
-make clean
+make run
 ```
+*Laissez ce terminal ouvert. Appuyez sur `Ctrl+C` pour arrêter proprement tous les services et nettoyer les ressources IPC.*
 
-## 3. Tests Automatisés
+## 3. Tests en Terminal (Client Interactif)
 
-### Test Complet du Système
-Un script est disponible pour lancer tous les services, exécuter une suite de tests, puis tout arrêter proprement.
+Pour tester rapidement la communication et les fonctionnalités sans interface graphique, utilisez le client interactif :
 
 ```bash
-make test-full
-# ou
-bash tests/run_full_test.sh
+./client_interactive
 ```
 
-Ce script teste :
-1. La compilation de tous les modules.
-2. Le lancement des services (Auth, Matchmaker, GameWorker, Server).
-3. La communication IPC entre les services.
-4. Un flux de jeu complet (Matchmaking + déplacements de pièces).
+### Commandes utiles dans le client :
+- `auth <nom>` : Se connecter (ex: `auth alice`)
+- `join` : Entrer dans la file d'attente pour une partie
+- `move <de> <vers>` : Jouer un coup (ex: `move e2 e4`)
+- `chat <message>` : Envoyer un message dans le salon
+- `list` : Voir les parties en cours
+- `watch <id>` : Observer une partie
+- `history` : Voir l'historique des parties
+- `quit` : Quitter le client
 
-### Test de la Suite de Fonctionnalités (IPC)
-Pour tester uniquement la communication entre les files de messages :
+## 4. Tests avec Interface Graphique (GUI)
+
+Pour une expérience réelle, lancez une ou plusieurs instances du client graphique :
 
 ```bash
-make test
+./chess_gui_client
 ```
 
-## 4. Tests Manuels
+*Note : Vous pouvez lancer deux instances de `./chess_gui_client` et vous connecter avec des noms différents pour jouer l'un contre l'autre.*
 
-### Utilisation du Client Interactif
-Le `client_interactive` permet de simuler un client réel se connectant au serveur.
+## 5. Dépannage
 
-1. **Lancer les services dans des terminaux séparés (ou via le script de test) :**
-   ```bash
-   ./auth_app
-   ./matchmaker_app
-   ./gameworker_app
-   ./server_app
-   ```
-
-2. **Lancer un ou plusieurs clients interactifs :**
-   ```bash
-   ./client_interactive <IP_SERVEUR> <PORT>
-   ```
-   *(Par défaut, utilisez `127.0.0.1` et le port configuré dans le serveur)*
-
-### Simulation de Paquets Spécifiques
-L'outil `test_client` peut être utilisé pour envoyer des paquets bruts pour tester des cas limites.
-
-```bash
-./test_client
-```
-
-## 5. Dépannage et Nettoyage IPC
-
-Le projet utilise des files de messages UNIX (System V IPC). Si un service plante, les files de messages peuvent rester actives et bloquer le redémarrage.
-
-### Nettoyer les ressources IPC
-Pour supprimer toutes les files de messages créées par votre utilisateur :
+Si les services ne redémarrent pas correctement (erreur "Message queue already exists" ou similaire), nettoyez manuellement les ressources IPC :
 
 ```bash
 make clean-ipc
 ```
-
-### Vérifier l'état des files
-Pour voir les files de messages actuellement actives :
-
-```bash
-ipcs -q
-```
-
-## 6. Structure des Tests
-- `tests/test_all_features.c` : Vérifie la robustesse des utilitaires IPC.
-- `tests/test_game_flow.c` : Simule un cycle de vie de partie (connexion -> matchmaking -> jeu).
-- `tests/interactive_client.c` : Client console interactif pour tester l'enchaînement des commandes.

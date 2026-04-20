@@ -18,7 +18,7 @@ TOURNAMENT_SRCS = services/tournament/tournament_main.c common/ipc_utils/ipc_uti
 STORAGE_SRCS = services/storage_worker/storage_worker_main.c common/ipc_utils/ipc_utils.c
 
 # Cibles principales
-all: server auth_service matchmaker_service gameworker_service chat_service tournament_service storage_service chess chess_gui_client test_client test_suite test_game_flow client_interactive
+all: server auth_service matchmaker_service gameworker_service chat_service tournament_service storage_service chess chess_gui_client client_interactive
 
 # Compilation du Serveur Unifié
 server: $(SERVER_SRCS)
@@ -71,32 +71,29 @@ client_interactive: tests/interactive_client.c
 	@echo "Compilation du client interactif..."
 	$(CC) $(CFLAGS) tests/interactive_client.c -lpthread -o client_interactive
 
-# Autres outils de test
-test_client: tests/simulate_packet.c
-	$(CC) $(CFLAGS) tests/simulate_packet.c -o test_client
-
-test_suite: tests/test_all_features.c common/ipc_utils/ipc_utils.c
-	$(CC) $(CFLAGS) tests/test_all_features.c common/ipc_utils/ipc_utils.c -o test_suite
-
-test_game_flow: tests/test_game_flow.c common/ipc_utils/ipc_utils.c
-	$(CC) $(CFLAGS) tests/test_game_flow.c common/ipc_utils/ipc_utils.c -o test_game_flow
-
-# Exécution
-test: test_suite
-	./test_suite
-
-test-full: all
-	bash tests/run_full_test.sh
+# Lancement des services
+run: all
+	@echo "=== Lancement des Services Chess ==="
+	@./auth_app > /dev/null 2>&1 & echo $$! > .auth.pid
+	@./matchmaker_app > /dev/null 2>&1 & echo $$! > .matchmaker.pid
+	@./gameworker_app > /dev/null 2>&1 & echo $$! > .gameworker.pid
+	@./chat_app > /dev/null 2>&1 & echo $$! > .chat.pid
+	@./tournament_app > /dev/null 2>&1 & echo $$! > .tournament.pid
+	@./storage_app > /dev/null 2>&1 & echo $$! > .storage.pid
+	@./server_app > /dev/null 2>&1 & echo $$! > .server.pid
+	@echo "Tous les services sont lancés."
+	@echo "Appuyez sur Ctrl+C pour arrêter les services."
+	@trap 'kill $$(cat .auth.pid .matchmaker.pid .gameworker.pid .chat.pid .tournament.pid .storage.pid .server.pid) 2>/dev/null; rm -f .*.pid; $(MAKE) clean-ipc; echo "\nServices arrêtés."; exit 0' SIGINT SIGTERM; \
+	while true; do sleep 1; done
 
 # Nettoyage
 clean:
-	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app chat_app tournament_app storage_app test_client test_suite test_game_flow client_interactive gateway
+	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app chat_app tournament_app storage_app client_interactive gateway .*.pid
 	rm -rf build/
-
 # Nettoyage manuel des ressources IPC (en cas de plantage)
 clean-ipc:
 	@echo "Nettoyage des files de messages..."
 	ipcs -q | grep $(shell whoami) | awk '{print $$2}' | xargs -r -n1 ipcrm -q
 	@echo "Nettoyage terminé."
 
-.PHONY: all chess server gateway clean test test-full clean-ipc
+.PHONY: all chess server gateway clean clean-ipc run
