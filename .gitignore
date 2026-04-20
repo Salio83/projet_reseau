@@ -28,7 +28,7 @@ test_suite
 test_game_flow
 chess_game
 gateway
-
+chat_app
 # IDE
 .vscode/
 .idea/
