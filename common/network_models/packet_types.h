@@ -29,8 +29,20 @@ typedef enum {
     PACKET_CHAT_BROADCAST = 22,
     PACKET_ERROR = 23,
     PACKET_MOVE_ERROR = 24,
+    PACKET_MATCHMAKING_STATUS = 25,
 
-    PACKET_GAME_UPDATE_UDP = 50
+    PACKET_GAME_UPDATE_UDP = 50,
+
+    PACKET_TOURNAMENT_CREATE_REQ = 60,
+    PACKET_TOURNAMENT_CREATE_RESP = 61,
+    PACKET_TOURNAMENT_LIST_REQ = 62,
+    PACKET_TOURNAMENT_LIST_RESP = 63,
+    PACKET_TOURNAMENT_JOIN_REQ = 64,
+    PACKET_TOURNAMENT_JOIN_RESP = 65,
+    PACKET_TOURNAMENT_STATE = 66,
+    PACKET_GAME_FINISHED = 67,
+    PACKET_GAME_OVER = 68,
+    PACKET_SAVE_HISTORY = 70
 } PacketType;
 
 typedef enum {
@@ -68,7 +80,13 @@ typedef struct {
     char opponent_username[MAX_USERNAME_LEN];
     char white_username[MAX_USERNAME_LEN];
     char black_username[MAX_USERNAME_LEN];
+    uint32_t tournament_id;
 } GameStarted;
+
+typedef struct {
+    uint32_t queue_size;
+    uint32_t position;
+} MatchmakingStatus;
 
 typedef struct {
     uint32_t game_id;
@@ -155,5 +173,61 @@ typedef struct {
 
 #define PACKET_GAME_STATE_UDP PACKET_GAME_UPDATE_UDP
 #define PACKET_SIZE(payload_type) (sizeof(PacketHeader) + sizeof(payload_type))
+
+typedef struct {
+    uint8_t max_players;
+} TournamentCreateReq;
+
+typedef struct {
+    uint32_t tournament_id;
+} TournamentCreateResp;
+
+typedef struct {
+    uint32_t tournament_id;
+    char username[MAX_USERNAME_LEN];
+} TournamentJoinReq;
+
+typedef struct {
+    uint32_t tournament_id;
+    uint8_t player_count;
+    uint8_t max_players;
+} ActiveTournamentInfo;
+
+typedef struct {
+    uint16_t tournament_count;
+    ActiveTournamentInfo tournaments[10];
+} TournamentListResp;
+
+typedef struct {
+    uint32_t tournament_id;
+    uint8_t joined;
+    uint8_t max;
+    uint8_t status; // 0=Wait, 1=Running, 2=Finished
+    char winner_name[MAX_USERNAME_LEN];
+} TournamentStatePacket;
+
+typedef struct {
+    uint16_t status; // 1 = ok, 0 = ko
+    char message[MAX_ERROR_MESSAGE_LEN];
+} TournamentJoinResp;
+
+typedef struct {
+    uint32_t tournament_id;
+    uint32_t winner_session_id;  // 0 if draw/null
+} GameFinished;
+
+typedef struct {
+    uint32_t room_id;
+    char white_name[MAX_USERNAME_LEN];
+    char black_name[MAX_USERNAME_LEN];
+    uint8_t result; // 1=white, 2=black, 0=draw
+    uint16_t move_count;
+} SaveHistoryReq;
+
+typedef struct {
+    uint32_t room_id;
+    uint8_t result;  // 1=white wins, 2=black wins, 0=draw(stalemate)
+    char winner_name[MAX_USERNAME_LEN];
+} GameOver;
 
 #endif // PACKET_TYPES_H

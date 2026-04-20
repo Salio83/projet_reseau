@@ -1,10 +1,10 @@
 # Configuration du compilateur
 CC = gcc
-CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs -DPROJECT_DIR=\"$(shell pwd)\"
+CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs -DPROJECT_DIR='"$(shell pwd)"'
 
 # Bibliothèques
-# Use locally built raylib with Wayland backend (bypasses broken X11/GLX on this machine)
-RAYLIB_LIBS = libs/libraylib.a -lEGL -lwayland-client -lwayland-egl -lxkbcommon -lm -lpthread -ldl -lrt
+# Use locally downloaded raylib since apt package is missing
+RAYLIB_LIBS = libs/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
 SERVER_LIBS = -lpthread
 
 # Chemins des sources
@@ -13,9 +13,12 @@ SERVER_SRCS = services/server_main.c services/gateway/gateway.c common/ipc_utils
 AUTH_SRCS = services/auth/auth_main.c common/ipc_utils/ipc_utils.c
 MATCHMAKER_SRCS = services/matchmaker/matchmaker_main.c common/ipc_utils/ipc_utils.c
 GAMEWORKER_SRCS = services/game_worker/game_worker_main.c common/ipc_utils/ipc_utils.c common/chess_engine/chess.c
+CHAT_SRCS = services/chat/chat_main.c common/ipc_utils/ipc_utils.c
+TOURNAMENT_SRCS = services/tournament/tournament_main.c common/ipc_utils/ipc_utils.c
+STORAGE_SRCS = services/storage_worker/storage_worker_main.c common/ipc_utils/ipc_utils.c
 
 # Cibles principales
-all: server auth_service matchmaker_service gameworker_service chess chess_gui_client test_client test_suite test_game_flow client_interactive
+all: server auth_service matchmaker_service gameworker_service chat_service tournament_service storage_service chess chess_gui_client test_client test_suite test_game_flow client_interactive
 
 # Compilation du Serveur Unifié
 server: $(SERVER_SRCS)
@@ -36,6 +39,21 @@ matchmaker_service: $(MATCHMAKER_SRCS)
 gameworker_service: $(GAMEWORKER_SRCS)
 	@echo "Compilation du Service GameWorker..."
 	$(CC) $(CFLAGS) $(GAMEWORKER_SRCS) -o gameworker_app
+
+# Compilation du Service Chat
+chat_service: $(CHAT_SRCS)
+	@echo "Compilation du Service Chat..."
+	$(CC) $(CFLAGS) $(CHAT_SRCS) -o chat_app
+
+# Compilation du Service Tournament
+tournament_service: $(TOURNAMENT_SRCS)
+	@echo "Compilation du Service Tournament..."
+	$(CC) $(CFLAGS) $(TOURNAMENT_SRCS) -o tournament_app
+
+# Compilation du Service Storage (Historique)
+storage_service: $(STORAGE_SRCS)
+	@echo "Compilation du Service Storage..."
+	$(CC) $(CFLAGS) $(STORAGE_SRCS) -o storage_app
 
 # Compilation du jeu d'échecs (Standalone)
 chess: $(CHESS_SRCS)
@@ -72,7 +90,7 @@ test-full: all
 
 # Nettoyage
 clean:
-	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app test_client test_suite test_game_flow client_interactive gateway
+	rm -f chess_game chess_gui_client server_app auth_app matchmaker_app gameworker_app chat_app tournament_app storage_app test_client test_suite test_game_flow client_interactive gateway
 	rm -rf build/
 
 # Nettoyage manuel des ressources IPC (en cas de plantage)

@@ -28,6 +28,7 @@ typedef struct {
     int spectator_count;
     GameState *state;
     uint32_t sequence_no;
+    uint32_t tournament_id;
     int active;
 } GameRoom;
 
@@ -88,12 +89,6 @@ static void board_to_simple_string(GameState *state, char *buffer) {
         buffer[pos++] = '/';
     }
     buffer[pos] = '\0';
-}
-
-static uint64_t now_ms(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (uint64_t)tv.tv_sec * 1000ULL + (uint64_t)(tv.tv_usec / 1000);
 }
 
 static void send_to_gateway(uint32_t session_id, PacketType type, const void *payload, size_t payload_size) {
@@ -157,51 +152,6 @@ static void broadcast_update(const GameRoom *room, const PlayerMove *move) {
     }
 }
 
-static const char *find_author_name(const GameRoom *room, uint32_t session_id) {
-    if (room->player_white == session_id) {
-        return room->white_name;
-    }
-    if (room->player_black == session_id) {
-        return room->black_name;
-    }
-    for (int i = 0; i < room->spectator_count; i++) {
-        if (room->spectators[i].session_id == session_id) {
-            return room->spectators[i].username;
-        }
-    }
-    return "unknown";
-}
-
-static void broadcast_chat(const GameRoom *room, uint32_t author_session_id, const char *message) {
-    ChatBroadcast broadcast;
-    memset(&broadcast, 0, sizeof(broadcast));
-    broadcast.room_id = room->room_id;
-    broadcast.author_session_id = author_session_id;
-    broadcast.timestamp_ms = now_ms();
-    strncpy(broadcast.author_name, find_author_name(room, author_session_id),
-            sizeof(broadcast.author_name) - 1);
-    strncpy(broadcast.message, message, sizeof(broadcast.message) - 1);
-
-    send_to_gateway(room->player_white, PACKET_CHAT_BROADCAST, &broadcast, sizeof(broadcast));
-    send_to_gateway(room->player_black, PACKET_CHAT_BROADCAST, &broadcast, sizeof(broadcast));
-    for (int i = 0; i < room->spectator_count; i++) {
-        send_to_gateway(room->spectators[i].session_id, PACKET_CHAT_BROADCAST, &broadcast,
-                        sizeof(broadcast));
-    }
-}
-
-static int room_contains_session(const GameRoom *room, uint32_t session_id) {
-    if (room->player_white == session_id || room->player_black == session_id) {
-        return 1;
-    }
-    for (int i = 0; i < room->spectator_count; i++) {
-        if (room->spectators[i].session_id == session_id) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 static void remove_spectator(GameRoom *room, uint32_t session_id) {
     for (int i = 0; i < room->spectator_count; i++) {
         if (room->spectators[i].session_id == session_id) {
@@ -225,6 +175,7 @@ static void handle_room_creation(PacketHeader *header, GameStarted *started) {
             rooms[i].state = game_init();
             strncpy(rooms[i].white_name, started->white_username, sizeof(rooms[i].white_name) - 1);
             strncpy(rooms[i].black_name, started->black_username, sizeof(rooms[i].black_name) - 1);
+            rooms[i].tournament_id = started->tournament_id;
             send_snapshot(rooms[i].player_white, &rooms[i]);
             send_snapshot(rooms[i].player_black, &rooms[i]);
             return;
@@ -336,26 +287,89 @@ static void handle_move(uint32_t session_id, PlayerMove *move) {
 
     room->sequence_no++;
     broadcast_update(room, move);
-}
 
-static void handle_chat(uint32_t session_id, ChatMessage *message) {
-    int index = find_room_index(message->room_id);
-    if (index == -1) {
-        send_error(session_id, 404, "Salon introuvable.");
-        return;
-    }
+    // Vérifier la fin de partie
+    if (room->state->checkmate || room->state->stalemate) {
+        int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+        
+        // Déterminer le résultat
+        uint8_t result;
+        const char *winner_name;
+        if (room->state->checkmate) {
+            // current_player est le joueur MATE (celui qui doit jouer mais ne peut pas)
+            // Donc le gagnant est l'autre
+            if (room->state->current_player == PLAYER_WHITE) {
+                result = 2; // Black wins
+                winner_name = room->black_name;
+            } else {
+                result = 1; // White wins
+                winner_name = room->white_name;
+            }
+        } else {
+            result = 0; // Draw (stalemate)
+            winner_name = "Egalite";
+        }
 
-    GameRoom *room = &rooms[index];
-    if (!room_contains_session(room, session_id)) {
-        send_error(session_id, 403, "Non autorisé dans ce salon.");
-        return;
-    }
-    if (message->message[0] == '\0') {
-        send_error(session_id, 400, "Message vide.");
-        return;
-    }
+        // Notifier les joueurs et spectateurs via PACKET_GAME_OVER
+        {
+            char go_buf[MAX_MSG_SIZE];
+            PacketHeader *go_header = (PacketHeader *)go_buf;
+            GameOver *go = (GameOver *)(go_buf + sizeof(PacketHeader));
+            memset(go_buf, 0, sizeof(go_buf));
 
-    broadcast_chat(room, session_id, message->message);
+            go_header->type = PACKET_GAME_OVER;
+            go_header->length = sizeof(PacketHeader) + sizeof(GameOver);
+            go->room_id = room->room_id;
+            go->result = result;
+            strncpy(go->winner_name, winner_name, sizeof(go->winner_name) - 1);
+
+            // Envoyer au joueur blanc
+            go_header->session_id = room->player_white;
+            ipc_msg_send(global_mq, go_buf, go_header->length, MSG_TYPE_GATEWAY);
+
+            // Envoyer au joueur noir
+            go_header->session_id = room->player_black;
+            ipc_msg_send(global_mq, go_buf, go_header->length, MSG_TYPE_GATEWAY);
+
+            // Envoyer aux spectateurs
+            for (int s = 0; s < room->spectator_count; s++) {
+                go_header->session_id = room->spectators[s].session_id;
+                ipc_msg_send(global_mq, go_buf, go_header->length, MSG_TYPE_GATEWAY);
+            }
+        }
+
+        // Envoi pour l'historique et les statistiques
+        char hist_buf[MAX_MSG_SIZE];
+        PacketHeader *hist_header = (PacketHeader *)hist_buf;
+        SaveHistoryReq *hist_req = (SaveHistoryReq *)(hist_buf + sizeof(PacketHeader));
+        memset(hist_buf, 0, sizeof(hist_buf));
+
+        hist_header->type = PACKET_SAVE_HISTORY;
+        hist_header->length = sizeof(PacketHeader) + sizeof(SaveHistoryReq);
+        hist_req->room_id = room->room_id;
+        strncpy(hist_req->white_name, room->white_name, sizeof(hist_req->white_name) - 1);
+        strncpy(hist_req->black_name, room->black_name, sizeof(hist_req->black_name) - 1);
+        hist_req->move_count = room->state->move_count;
+        hist_req->result = result;
+        ipc_msg_send(global_mq, hist_buf, hist_header->length, MSG_TYPE_STORAGE);
+
+        // Si tournoi, on notifie le Tournoi
+        if (room->tournament_id != 0) {
+            char out_buf[MAX_MSG_SIZE];
+            PacketHeader *out_header = (PacketHeader *)out_buf;
+            GameFinished *finished = (GameFinished *)(out_buf + sizeof(PacketHeader));
+            memset(out_buf, 0, sizeof(out_buf));
+
+            out_header->type = PACKET_GAME_FINISHED;
+            out_header->length = sizeof(PacketHeader) + sizeof(GameFinished);
+            
+            finished->tournament_id = room->tournament_id;
+            finished->winner_session_id = session_id;
+            
+            ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_TOURNAMENT);
+        }
+        room->active = 0; // Fermer la salle
+    }
 }
 
 static void handle_disconnect(PacketHeader *header, ClientDisconnected *disconnected) {
@@ -365,6 +379,30 @@ static void handle_disconnect(PacketHeader *header, ClientDisconnected *disconne
         return;
     }
     remove_spectator(room, header->session_id);
+    
+    // Si c'est un joueur qui déconnecte en plein tournoi
+    if (room->tournament_id != 0 && (room->player_white == header->session_id || room->player_black == header->session_id)) {
+        char out_buf[MAX_MSG_SIZE];
+        PacketHeader *out_header = (PacketHeader *)out_buf;
+        GameFinished *finished = (GameFinished *)(out_buf + sizeof(PacketHeader));
+        memset(out_buf, 0, sizeof(out_buf));
+
+        out_header->type = PACKET_GAME_FINISHED;
+        out_header->length = sizeof(PacketHeader) + sizeof(GameFinished);
+        finished->tournament_id = room->tournament_id;
+        
+        // Le gagnant est l'autre joueur
+        if (room->player_white == header->session_id) {
+            finished->winner_session_id = room->player_black;
+        } else {
+            finished->winner_session_id = room->player_white;
+        }
+        
+        int global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
+        ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_TOURNAMENT);
+        
+        room->active = 0;
+    }
 }
 
 int main(void) {
@@ -403,9 +441,6 @@ int main(void) {
                 break;
             case PACKET_PLAYER_MOVE:
                 handle_move(header->session_id, (PlayerMove *)payload);
-                break;
-            case PACKET_CHAT_MSG:
-                handle_chat(header->session_id, (ChatMessage *)payload);
                 break;
             case PACKET_CLIENT_DISCONNECTED:
                 handle_disconnect(header, (ClientDisconnected *)payload);

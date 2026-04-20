@@ -21,5 +21,7 @@
 #define MSG_TYPE_GAMEWORKER 3
 #define MSG_TYPE_CHAT 4
 #define MSG_TYPE_GATEWAY 5
+#define MSG_TYPE_TOURNAMENT 6
+#define MSG_TYPE_STORAGE 7
 
 #endif // IPC_KEYS_H
