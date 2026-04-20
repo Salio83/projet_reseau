@@ -175,6 +175,14 @@ static void handle_packet(PacketHeader *header, const char *payload) {
             printf("> ");
             break;
         }
+        case PACKET_GET_HISTORY_RESP: {
+            const HistoryResp *resp = (const HistoryResp *)payload;
+            printf("\n--- Historique des parties ---\n%s", resp->history_text);
+            if (resp->last_part) {
+                printf("-----------------------------\n> ");
+            }
+            break;
+        }
         case PACKET_GAME_OVER: {
             const GameOver *go = (const GameOver *)payload;
             if (go->result == 1) {
@@ -261,6 +269,7 @@ static void print_help(void) {
     printf("  leave             : quitter le mode spectateur\n");
     printf("  move <from> <to>  : jouer un coup\n");
     printf("  chat <texte>      : envoyer un message au salon courant\n");
+    printf("  history [filter]  : voir l'historique des parties\n");
     printf("  tourney_create <max_players>: creer un tournoi\n");
     printf("  tourney_join <id>           : rejoindre un tournoi\n");
     printf("  tourney_list                : lister les tournois en attente\n");
@@ -410,6 +419,16 @@ int main(void) {
         } else if (strcmp(cmd, "tourney_list") == 0) {
             PacketHeader header = {PACKET_TOURNAMENT_LIST_REQ, sizeof(PacketHeader), session_id};
             send(tcp_sock, &header, sizeof(header), 0);
+        } else if (strcmp(cmd, "history") == 0) {
+            char *filter = strtok(NULL, " ");
+            PacketHeader header = {PACKET_GET_HISTORY_REQ, (uint16_t)PACKET_SIZE(HistoryReq), session_id};
+            HistoryReq req;
+            memset(&req, 0, sizeof(req));
+            if (filter) {
+                strncpy(req.filter_username, filter, sizeof(req.filter_username) - 1);
+            }
+            send(tcp_sock, &header, sizeof(header), 0);
+            send(tcp_sock, &req, sizeof(req), 0);
         }
     }
 

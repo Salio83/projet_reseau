@@ -8,6 +8,7 @@
 #define MAX_ERROR_MESSAGE_LEN 128
 #define MAX_FEN_BOARD_LEN 90
 #define MAX_ACTIVE_GAMES_LISTED 16
+#define MAX_MSG_SIZE 2048
 
 typedef enum {
     PACKET_AUTH_REQ = 1,
@@ -42,7 +43,10 @@ typedef enum {
     PACKET_TOURNAMENT_STATE = 66,
     PACKET_GAME_FINISHED = 67,
     PACKET_GAME_OVER = 68,
-    PACKET_SAVE_HISTORY = 70
+    PACKET_FORFEIT = 69,
+    PACKET_SAVE_HISTORY = 70,
+    PACKET_GET_HISTORY_REQ = 71,
+    PACKET_GET_HISTORY_RESP = 72
 } PacketType;
 
 typedef enum {
@@ -217,10 +221,23 @@ typedef struct {
 } GameFinished;
 
 typedef struct {
+    char filter_username[MAX_USERNAME_LEN];
+} HistoryReq;
+
+typedef struct {
+    char history_text[MAX_MSG_SIZE - 128];
+    uint8_t last_part;
+} HistoryResp;
+
+typedef struct {
+    uint32_t room_id;
+} ForfeitReq;
+
+typedef struct {
     uint32_t room_id;
     char white_name[MAX_USERNAME_LEN];
     char black_name[MAX_USERNAME_LEN];
-    uint8_t result; // 1=white, 2=black, 0=draw
+    uint8_t result; // 0=draw, 1=white wins, 2=black wins, 3=ongoing, 4=white forfeit, 5=black forfeit
     uint16_t move_count;
 } SaveHistoryReq;
 

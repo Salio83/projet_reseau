@@ -192,6 +192,7 @@ static void route_packet(ClientSession *session, PacketHeader *header, const cha
         case PACKET_PLAYER_MOVE:
         case PACKET_LIST_ACTIVE_GAMES_REQ:
         case PACKET_SPECTATE_LEAVE_REQ:
+        case PACKET_FORFEIT:
             memcpy(out_buf, header, sizeof(PacketHeader));
             if (payload_len > 0) {
                 memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
@@ -241,6 +242,13 @@ static void route_packet(ClientSession *session, PacketHeader *header, const cha
             target_type = MSG_TYPE_TOURNAMENT;
             break;
         }
+        case PACKET_GET_HISTORY_REQ:
+            memcpy(out_buf, header, sizeof(PacketHeader));
+            if (payload_len > 0) {
+                memcpy(out_buf + sizeof(PacketHeader), payload, payload_len);
+            }
+            target_type = MSG_TYPE_STORAGE;
+            break;
         default:
             send_packet_error(session, 400, "Type de paquet inconnu.");
             return;

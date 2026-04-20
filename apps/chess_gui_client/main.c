@@ -28,7 +28,8 @@ typedef enum {
     STATE_PLAYING,
     STATE_GAME_OVER,
     STATE_TOURNAMENT_LOBBY,
-    STATE_TOURNAMENT_WINNER
+    STATE_TOURNAMENT_WINNER,
+    STATE_HISTORY
 } AppScreenState;
 
 typedef struct {
@@ -61,9 +62,28 @@ typedef struct {
     int tournament_max_players;
     int tournament_status; // 0=Wait, 1=Running, 2=Finished
     char tournament_winner[MAX_USERNAME_LEN];
+    char history_text[8192];
+    int history_scroll;
 } ClientApp;
 
-static void send_tournament_join(ClientApp *app, uint32_t tournament_id);
+static void send_history_req(ClientApp *app) {
+    PacketHeader header = {PACKET_GET_HISTORY_REQ, PACKET_SIZE(HistoryReq), app->session_id};
+    HistoryReq req;
+    memset(&req, 0, sizeof(req));
+    send(app->sock, &header, sizeof(header), 0);
+    send(app->sock, &req, sizeof(req), 0);
+    app->history_text[0] = '\0';
+}
+
+static void send_tournament_join(ClientApp *app, uint32_t tournament_id) {
+    PacketHeader header = {PACKET_TOURNAMENT_JOIN_REQ, PACKET_SIZE(TournamentJoinReq), app->session_id};
+    TournamentJoinReq req;
+    memset(&req, 0, sizeof(req));
+    req.tournament_id = tournament_id;
+    app->tournament_id = tournament_id;
+    send(app->sock, &header, sizeof(header), 0);
+    send(app->sock, &req, sizeof(req), 0);
+}
 
 static PieceType fen_char_to_type(char c) {
     switch (tolower(c)) {
@@ -305,6 +325,11 @@ static void handle_packet_locked(ClientApp *app, PacketHeader *header, const cha
                      app->active_tournaments.tournament_count);
             break;
         }
+        case PACKET_GET_HISTORY_RESP: {
+            const HistoryResp *resp = (const HistoryResp *)payload;
+            strncat(app->history_text, resp->history_text, sizeof(app->history_text) - strlen(app->history_text) - 1);
+            break;
+        }
         default:
             break;
     }
@@ -494,16 +519,6 @@ static void send_tournament_list(ClientApp *app) {
     send(app->sock, &header, sizeof(header), 0);
 }
 
-static void send_tournament_join(ClientApp *app, uint32_t tournament_id) {
-    PacketHeader header = {PACKET_TOURNAMENT_JOIN_REQ, PACKET_SIZE(TournamentJoinReq), app->session_id};
-    TournamentJoinReq req;
-    memset(&req, 0, sizeof(req));
-    req.tournament_id = tournament_id;
-    app->tournament_id = tournament_id;
-    send(app->sock, &header, sizeof(header), 0);
-    send(app->sock, &req, sizeof(req), 0);
-}
-
 static void render_connect_screen(ClientApp *app, char *input_buf, int *input_len) {
     ClearBackground((Color){20, 20, 40, 255});
 
@@ -574,12 +589,15 @@ static void render_lobby_screen(ClientApp *app) {
     // --- MODE TOGGLES ---
     Rectangle mode_games_btn = {60, 140, 200, 40};
     Rectangle mode_tourn_btn = {280, 140, 200, 40};
+    Rectangle mode_hist_btn = {500, 140, 200, 40};
     Vector2 mouse = GetMousePosition();
 
     DrawRectangleRec(mode_games_btn, app->lobby_mode == 0 ? DARKBLUE : (Color){40, 40, 60, 255});
     DrawRectangleRec(mode_tourn_btn, app->lobby_mode == 1 ? PURPLE : (Color){60, 40, 60, 255});
+    DrawRectangleRec(mode_hist_btn, (Color){60, 60, 40, 255});
     DrawText("PARTIES", 105, 150, 20, WHITE);
     DrawText("TOURNOIS", 325, 150, 20, WHITE);
+    DrawText("HISTORIQUE", 540, 150, 20, WHITE);
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (CheckCollisionPointRec(mouse, mode_games_btn)) {
@@ -588,6 +606,9 @@ static void render_lobby_screen(ClientApp *app) {
         } else if (CheckCollisionPointRec(mouse, mode_tourn_btn)) {
             app->lobby_mode = 1;
             send_tournament_list(app);
+        } else if (CheckCollisionPointRec(mouse, mode_hist_btn)) {
+            app->screen = STATE_HISTORY;
+            send_history_req(app);
         }
     }
 
@@ -868,6 +889,30 @@ static void render_tournament_lobby_screen(ClientApp *app) {
     DrawText(status_msg, 20, SCREEN_H - 30, 18, (joined == max ? GREEN : ORANGE));
 }
 
+static void render_history_screen(ClientApp *app) {
+    ClearBackground((Color){30, 30, 45, 255});
+    DrawText("HISTORIQUE DES PARTIES", SCREEN_W / 2 - 250, 40, 40, GOLD);
+
+    Rectangle box = {100, 100, SCREEN_W - 200, SCREEN_H - 250};
+    DrawRectangleRec(box, (Color){20, 20, 30, 255});
+    DrawRectangleLinesEx(box, 2, GRAY);
+
+    // Affichage simplifié du texte
+    DrawText(app->history_text, (int)box.x + 20, (int)box.y + 20, 18, LIGHTGRAY);
+
+    Rectangle back_btn = {SCREEN_W / 2 - 100, SCREEN_H - 120, 200, 50};
+    Vector2 mouse = GetMousePosition();
+    int hover = CheckCollisionPointRec(mouse, back_btn);
+    DrawRectangleRec(back_btn, hover ? DARKBLUE : BLUE);
+    DrawText("RETOUR", (int)back_btn.x + 60, (int)back_btn.y + 15, 20, WHITE);
+
+    if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        pthread_mutex_lock(&app->lock);
+        app->screen = STATE_LOBBY;
+        pthread_mutex_unlock(&app->lock);
+    }
+}
+
 static void render_tournament_winner_screen(ClientApp *app) {
     char winner_name[MAX_USERNAME_LEN];
     pthread_mutex_lock(&app->lock);
@@ -942,6 +987,9 @@ int main(void) {
                 break;
             case STATE_TOURNAMENT_WINNER:
                 render_tournament_winner_screen(&app);
+                break;
+            case STATE_HISTORY:
+                render_history_screen(&app);
                 break;
         }
 
