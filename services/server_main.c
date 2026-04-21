@@ -23,6 +23,7 @@ const char* service_names[NUM_SERVICES] = {
     "gateway_process"
 };
 
+// arrêt propre de tous les services enfants en envoyant un signal SIGTERM, attente de leur terminaison et suppression de la file de messages IPC
 void cleanup_and_exit(int sig) {
     printf("\n[Server Main] Signal %d reçu. Nettoyage en cours...\n", sig);
 
@@ -52,6 +53,7 @@ void cleanup_and_exit(int sig) {
     exit(0);
 }
 
+// création d'un nouveau processus via fork pour lancer un service spécifié, soit en exécutant un binaire séparé, soit en démarrant le gateway
 void launch_service(int index, const char* path) {
     pid_t pid = fork();
     if (pid == 0) {
@@ -74,6 +76,7 @@ void launch_service(int index, const char* path) {
     }
 }
 
+// initialisation du serveur, configuration des signaux, nettoyage des anciennes ressources et lancement séquentiel de tous les services du système
 int main() {
     printf("Démarrage de l'orchestrateur World Polytech Chess...\n");
 

@@ -424,6 +424,7 @@ static void handle_disconnect(PacketHeader *header, ClientDisconnected *disconne
     }
 }
 
+// boucle de traitement des messages de type "MSG_TYPE_GAMEWORKER" pour gérer le cycle de vie des parties, incluant la création de salons, les coups des joueurs, le mode spectateur et les abandons
 int main(void) {
     printf("[GameWorker] Démarrage...\n");
 

@@ -160,6 +160,7 @@ static void handle_get_history(uint32_t session_id, HistoryReq *req) {
     fclose(f);
 }
 
+// lecture sur la file de message pour le type "MSG_TYPE_STORAGE", permettant l'enregistrement de l'historique des parties et la récupération des statistiques et logs de jeux pour les clients
 int main(void) {
     printf("[Storage Worker] Demarrage...\n");
 

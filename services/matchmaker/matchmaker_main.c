@@ -133,6 +133,7 @@ static void try_match(uint32_t *next_room_id) {
     broadcast_queue_status();
 }
 
+// lecture sur la file de message pour le type "MSG_TYPE_MATCHMAKING", traitant les demandes d'entrée en file d'attente, les déconnexions et déclenchant la création de matchs quand assez de joueurs sont présents
 int main(void) {
     printf("[Matchmaker] Démarrage...\n");
 

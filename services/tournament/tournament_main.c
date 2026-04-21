@@ -352,6 +352,7 @@ static void handle_game_finished(GameFinished *fin) {
 }
 
 
+// boucle d'événements pour le type "MSG_TYPE_TOURNAMENT", gérant la création de tournois, l'inscription des joueurs, la génération du bracket et le suivi de la progression des matchs
 int main(void) {
     printf("[Tournament Worker] Demarrage de la boucle d'evenements...\n");
 

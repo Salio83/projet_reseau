@@ -142,6 +142,7 @@ static void handle_chat_msg(PacketHeader *header, ChatMessage *msg) {
     }
 }
 
+// boucle principale de lecture sur la file de message pour le type "MSG_TYPE_CHAT", gérant les mises à jour des membres de salon, les déconnexions et la diffusion des messages de chat
 int main(void) {
     printf("[Chat Service] Démarrage...\n");
 
