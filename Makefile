@@ -1,10 +1,20 @@
 # Configuration du compilateur
 CC = gcc
-CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs -DPROJECT_DIR='"$(shell pwd)"'
+# Utilisation de PWD dynamique pour la portabilité
+CURRENT_DIR = $(shell pwd)
+CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs -DPROJECT_DIR='"$(CURRENT_DIR)"'
 
-# Bibliothèques
-# Use locally downloaded raylib since apt package is missing
-RAYLIB_LIBS = libs/libraylib.a -lGL -lm -lpthread -ldl -lrt -lX11
+# Détection de Raylib (Local vs Système)
+LOCAL_RAYLIB = libs/libraylib.a
+ifeq ($(wildcard $(LOCAL_RAYLIB)),)
+    # Si pas de lib locale, on tente le lien système
+    RAYLIB_LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+    RAYLIB_MSG = "Utilisation de raylib système"
+else
+    # Utilisation de la lib locale
+    RAYLIB_LIBS = $(LOCAL_RAYLIB) -lGL -lm -lpthread -ldl -lrt -lX11
+    RAYLIB_MSG = "Utilisation de raylib locale (libs/)"
+endif
 SERVER_LIBS = -lpthread
 
 # Chemins des sources
@@ -57,13 +67,13 @@ storage_service: $(STORAGE_SRCS)
 
 # Compilation du jeu d'échecs (Standalone)
 chess: $(CHESS_SRCS)
-	@echo "Compilation du jeu d'échecs..."
+	@echo "Compilation du jeu d'échecs ($(RAYLIB_MSG))..."
 	$(CC) $(CFLAGS) $(CHESS_SRCS) $(RAYLIB_LIBS) -o chess_game
 
 # Compilation du client GUI réseau
 GUI_CLIENT_SRCS = apps/chess_gui_client/main.c common/chess_engine/chess.c common/render/render.c
 chess_gui_client: $(GUI_CLIENT_SRCS)
-	@echo "Compilation du client GUI réseau..."
+	@echo "Compilation du client GUI réseau ($(RAYLIB_MSG))..."
 	$(CC) $(CFLAGS) $(GUI_CLIENT_SRCS) $(RAYLIB_LIBS) -lpthread -o chess_gui_client
 
 # Client interactif pour les tests manuels

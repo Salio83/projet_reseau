@@ -139,6 +139,8 @@ static void notify_disconnect(const ClientSession *session) {
 
     ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_GAMEWORKER);
     ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_CHAT);
+    ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_MATCHMAKING);
+    ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_TOURNAMENT);
 }
 
 static void destroy_session(ClientSession *session) {
@@ -288,6 +290,17 @@ static void handle_service_responses(void) {
 
     while (ipc_msg_receive_nowait(global_mq, msg_buffer, sizeof(msg_buffer), MSG_TYPE_GATEWAY) != -1) {
         PacketHeader *header = (PacketHeader *)msg_buffer;
+
+        // Support du broadcast si session_id == 0xFFFFFFFF
+        if (header->session_id == 0xFFFFFFFF) {
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                if (sessions[i].in_use && sessions[i].tcp_fd > 0) {
+                    send_all(sessions[i].tcp_fd, msg_buffer, header->length);
+                }
+            }
+            continue;
+        }
+
         ClientSession *session = find_session_by_id(header->session_id);
 
         if (header->type == PACKET_GAME_UPDATE_UDP) {

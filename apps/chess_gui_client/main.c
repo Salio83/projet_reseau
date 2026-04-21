@@ -195,11 +195,18 @@ static void handle_packet_locked(ClientApp *app, PacketHeader *header, const cha
         }
         case PACKET_MATCHMAKING_STATUS: {
             const MatchmakingStatus *ms = (const MatchmakingStatus *)payload;
-            app->is_in_queue = 1;
             app->queue_size = ms->queue_size;
-            app->queue_pos = ms->position;
-            snprintf(app->status_msg, sizeof(app->status_msg), "En file d'attente... (%u/%u)",
-                     app->queue_pos, app->queue_size);
+            if (ms->position > 0) {
+                app->is_in_queue = 1;
+                app->queue_pos = ms->position;
+                snprintf(app->status_msg, sizeof(app->status_msg), "En file d'attente... (%u/%u)",
+                         app->queue_pos, app->queue_size);
+            } else {
+                // Info globale, on ne change pas app->is_in_queue
+                if (!app->is_in_queue) {
+                    snprintf(app->status_msg, sizeof(app->status_msg), "File d'attente : %u joueur(s)", app->queue_size);
+                }
+            }
             break;
         }
         case PACKET_GAME_SNAPSHOT: {
@@ -276,6 +283,12 @@ static void handle_packet_locked(ClientApp *app, PacketHeader *header, const cha
             } else if (go->result == 2) {
                 snprintf(app->game_over_msg, sizeof(app->game_over_msg),
                          "Echec et Mat ! Les NOIRS gagnent ! Vainqueur : %s", go->winner_name);
+            } else if (go->result == 4) {
+                snprintf(app->game_over_msg, sizeof(app->game_over_msg),
+                         "Abandon des BLANCS. Les NOIRS gagnent ! Vainqueur : %s", go->winner_name);
+            } else if (go->result == 5) {
+                snprintf(app->game_over_msg, sizeof(app->game_over_msg),
+                         "Abandon des NOIRS. Les BLANCS gagnent ! Vainqueur : %s", go->winner_name);
             } else {
                 snprintf(app->game_over_msg, sizeof(app->game_over_msg), "Pat ! Match nul.");
             }
@@ -621,6 +634,9 @@ static void render_lobby_screen(ClientApp *app) {
         DrawRectangleRec(list_btn, CheckCollisionPointRec(mouse, list_btn) ? DARKBLUE : (Color){30, 45, 80, 255});
         DrawText("REJOINDRE UNE PARTIE", 75, 217, 20, WHITE);
         DrawText("RAFRAICHIR", 390, 217, 20, WHITE);
+
+        // Affichage de la file d'attente
+        DrawText(TextFormat("Joueurs en file d'attente : %u", app->queue_size), 600, 217, 20, GOLD);
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             if (CheckCollisionPointRec(mouse, join_btn)) send_join(app);
