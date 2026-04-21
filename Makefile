@@ -1,10 +1,10 @@
 # Configuration du compilateur
 CC = gcc
-CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs -DPROJECT_DIR=\"$(shell pwd)\"
+CFLAGS = -Wall -Wextra -Icommon/chess_engine -Icommon/render -Icommon/ipc_utils -Icommon/network_models -Iservices/gateway -Ilibs '-DPROJECT_DIR="$(shell pwd)"'
 
 # Bibliothèques
 # Use locally built raylib with Wayland backend (bypasses broken X11/GLX on this machine)
-RAYLIB_LIBS = libs/libraylib.a -lEGL -lwayland-client -lwayland-egl -lxkbcommon -lm -lpthread -ldl -lrt
+RAYLIB_LIBS = /usr/local/lib/libraylib.a -lEGL -lwayland-client -lwayland-egl -lxkbcommon -lX11 -lm -lpthread -ldl -lrt
 SERVER_LIBS = -lpthread
 
 # Chemins des sources

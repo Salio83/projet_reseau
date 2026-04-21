@@ -288,9 +288,10 @@ static void handle_service_responses(void) {
         }
 
         if (header->type == PACKET_AUTH_OK) {
-            AuthOk *ok = (AuthOk *)(msg_buffer + sizeof(PacketHeader));
+            AuthOk *ok = (AuthOk *)(msg_buffer + sizeof(PacketHeader));   
             session->authenticated = 1;
             strncpy(session->username, ok->username, sizeof(session->username) - 1);
+            ipc_msg_send(global_mq, msg_buffer, header->length, MSG_TYPE_CHAT);
         } else if (header->type == PACKET_GAME_STARTED) {
             GameStarted *started = (GameStarted *)(msg_buffer + sizeof(PacketHeader));
             session->current_room_id = started->room_id;
