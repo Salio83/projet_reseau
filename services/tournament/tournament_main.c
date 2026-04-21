@@ -8,47 +8,50 @@
 #include "../../common/ipc_utils/ipc_utils.h"
 #include "../../common/network_models/packet_types.h"
 
-#define MAX_TOURNAMENTS 10
-#define MAX_T_PLAYERS 32
-#define MAX_MATCHES (MAX_T_PLAYERS * 2)
+#define MAX_TOURNAMENTS 10        // Nombre maximum de tournois
+#define MAX_T_PLAYERS 32          // Joueurs max par tournoi
+#define MAX_MATCHES (MAX_T_PLAYERS * 2) // Taille du tableau pour l'arbre binaire des matchs
+
 
 typedef struct {
-    uint32_t session_id;
-    char username[MAX_USERNAME_LEN];
+    uint32_t session_id;               // Identifiant
+    char username[MAX_USERNAME_LEN];   // Nom d'utilisateur 
 } TPlayer;
 
-typedef struct {
-    int valid;
-    uint32_t p1;
-    uint32_t p2;
-    char p1_name[MAX_USERNAME_LEN];
-    char p2_name[MAX_USERNAME_LEN];
-    uint32_t winner;
-    int next_match_idx; // -1 if final
-    int started;
-} TMatch;
 
 typedef struct {
-    uint32_t id;
-    int active; // 0=none, 1=waiting, 2=running
-    int max_players;
-    TPlayer players[MAX_T_PLAYERS];
-    int player_count;
-    TMatch matches[MAX_MATCHES];
-    int num_matches;
+    int valid;                         // Indique si le match fait partie du bracket actuel
+    uint32_t p1;                       // Session ID du joueur 1 (Blanc)
+    uint32_t p2;                       // Session ID du joueur 2 (Noir)
+    char p1_name[MAX_USERNAME_LEN];
+    char p2_name[MAX_USERNAME_LEN];
+    uint32_t winner;                   // Session ID du vainqueur
+    int next_match_idx;                
+    int started;                       // Flag pour éviter de relancer un match déjà en cours
+} TMatch;
+
+
+typedef struct {
+    uint32_t id;                       
+    int active;                        // État : 0=Inactif, 1=Attente joueurs, 2=En cours
+    int max_players;                   // Limite de participants
+    TPlayer players[MAX_T_PLAYERS];    // Liste inscrits
+    int player_count;                  // Nombre d'inscrits
+    TMatch matches[MAX_MATCHES];       // arbre des rencontres
+    int num_matches;                   // Nombre total de matchs calculés pour ce bracket
 } Tournament;
 
 static Tournament tournaments[MAX_TOURNAMENTS];
 static uint32_t next_tourney_id = 1;
-static uint32_t next_room_id = 10000; // start high to avoid collision with matchmaking
-static int global_mq = -1;
+static uint32_t next_room_id = 10000;  // Gros nombre sinon collisions
+static int global_mq = -1;             // File de Messages IPC
+
 
 static int next_power_of_2(int n) {
     int p = 1;
     while (p < n) p *= 2;
     return p;
 }
-
 static void send_to_gateway(uint32_t session_id, PacketType type, const void *payload, size_t payload_size) {
     char out_buf[MAX_MSG_SIZE];
     PacketHeader *header = (PacketHeader *)out_buf;
@@ -61,8 +64,10 @@ static void send_to_gateway(uint32_t session_id, PacketType type, const void *pa
     if (payload && payload_size > 0) {
         memcpy(out_buf + sizeof(PacketHeader), payload, payload_size);
     }
+    // Envoi via IPC avec le type MSG_TYPE_GATEWAY
     ipc_msg_send(global_mq, out_buf, header->length, MSG_TYPE_GATEWAY);
 }
+
 
 static void broadcast_tournament_state(Tournament *t) {
     TournamentStatePacket pkt;
@@ -70,7 +75,7 @@ static void broadcast_tournament_state(Tournament *t) {
     pkt.tournament_id = t->id;
     pkt.joined = (uint8_t)t->player_count;
     pkt.max = (uint8_t)t->max_players;
-    pkt.status = (uint8_t)(t->active == 2 ? 1 : 0); // 0=Wait, 1=Running
+    pkt.status = (uint8_t)(t->active == 2 ? 1 : 0); // 0=Attente, 1=En cours
     pkt.winner_name[0] = '\0';
 
     for (int i = 0; i < t->player_count; i++) {
@@ -78,8 +83,10 @@ static void broadcast_tournament_state(Tournament *t) {
     }
 }
 
+
 static void send_start_room(Tournament *t, int match_index) {
     TMatch *m = &t->matches[match_index];
+    // Sécurité : ne pas lancer si le match est déjà en cours ou incomplet
     if (m->started || m->winner != 0 || m->p1 == 0 || m->p2 == 0) return;
 
     m->started = 1;
@@ -98,38 +105,36 @@ static void send_start_room(Tournament *t, int match_index) {
     strncpy(started->white_username, m->p1_name, sizeof(started->white_username) - 1);
     strncpy(started->black_username, m->p2_name, sizeof(started->black_username) - 1);
 
-    // Send to Player 1 (White)
+    // Préparation pour le Joueur 1 (Blanc)
     out_header->session_id = m->p1;
     started->opponent_session_id = m->p2;
     started->your_color = 0;
     strncpy(started->opponent_username, m->p2_name, sizeof(started->opponent_username) - 1);
     ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_GATEWAY);
 
-    // Send to Player 2 (Black)
+    // Préparation pour le Joueur 2 (Noir)
     out_header->session_id = m->p2;
     started->opponent_session_id = m->p1;
     started->your_color = 1;
     strncpy(started->opponent_username, m->p1_name, sizeof(started->opponent_username) - 1);
     ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_GATEWAY);
 
-    // Send to Gameworker
     out_header->session_id = m->p1;
-    started->opponent_session_id = m->p2;
-    started->your_color = 0;
-    strncpy(started->opponent_username, m->p2_name, sizeof(started->opponent_username) - 1);
     ipc_msg_send(global_mq, out_buf, out_header->length, MSG_TYPE_GAMEWORKER);
     
-    printf("[Tournament] Match started in room %d for Tournament %d\n", room_id, t->id);
+    printf("[Tournament] Match lance dans la salle %d (Tournoi %d)\n", room_id, t->id);
 }
+
 
 static void advance_winner(Tournament *t, int match_index, uint32_t winner_id, const char* winner_name) {
     TMatch *m = &t->matches[match_index];
     m->winner = winner_id;
     
+    // Cas de la Finale terminée
     if (m->next_match_idx == -1) {
-        printf("[Tournament] Tournament %d finished! Winner: %s\n", t->id, winner_name);
+        printf("[Tournament] Tournoi %d termine ! Vainqueur : %s\n", t->id, winner_name);
         
-        // Notification de VICTOIRE (status=2)
+        // Notification générale de fin de tournoi
         TournamentStatePacket pkt;
         memset(&pkt, 0, sizeof(pkt));
         pkt.tournament_id = t->id;
@@ -142,11 +147,12 @@ static void advance_winner(Tournament *t, int match_index, uint32_t winner_id, c
             send_to_gateway(t->players[i].session_id, PACKET_TOURNAMENT_STATE, &pkt, sizeof(pkt));
         }
 
-        // Nettoyage complet
+        // Libération de l'emplacement du tournoi
         memset(t, 0, sizeof(Tournament));
         return;
     }
 
+    // Progression vers le match suivant dans le bracket
     TMatch *next_m = &t->matches[m->next_match_idx];
     if (next_m->p1 == 0) {
         next_m->p1 = winner_id;
@@ -156,31 +162,33 @@ static void advance_winner(Tournament *t, int match_index, uint32_t winner_id, c
         strncpy(next_m->p2_name, winner_name, MAX_USERNAME_LEN - 1);
     }
 
-    // Si le prochain match est prêt, le lancer
+    // Si les deux adversaires du match suivant sont connus, on le lance
     if (next_m->p1 != 0 && next_m->p2 != 0) {
         send_start_room(t, m->next_match_idx);
     }
 }
 
+
 static void build_bracket(Tournament *t) {
+    // Calcul de la taille de l'arbre
     int p = next_power_of_2(t->player_count);
     int byes = p - t->player_count;
     int num_matches = p - 1;
     t->num_matches = num_matches;
 
+    // Initialisation des matchs
     for (int i = 0; i < num_matches; i++) {
         memset(&t->matches[i], 0, sizeof(TMatch));
         t->matches[i].valid = 1;
         t->matches[i].next_match_idx = -1;
     }
 
-    // Le tableau des matchs est arrangé en arbre parfait :
-    // Les p/2 premiers matchs (indices 0 à p/2 - 1) sont le premier tour.
-    // Leurs enfants vont dans (p/2) + i/2.
+    
     int first_round_matches = p / 2;
     int current_offset = 0;
     int level_matches = first_round_matches;
 
+    // Liaison des  enfants vers leurs parents
     while (level_matches > 1) {
         for (int i = 0; i < level_matches; i++) {
             t->matches[current_offset + i].next_match_idx = current_offset + level_matches + (i / 2);
@@ -189,18 +197,20 @@ static void build_bracket(Tournament *t) {
         level_matches /= 2;
     }
 
-    // Peupler le premier tour
+    // Remplissage du premier tour avec les joueurs inscrits
     int player_idx = 0;
     for (int i = 0; i < first_round_matches; i++) {
+        // Joueur 1 du match i
         if (player_idx < t->player_count) {
             t->matches[i].p1 = t->players[player_idx].session_id;
             strncpy(t->matches[i].p1_name, t->players[player_idx].username, MAX_USERNAME_LEN - 1);
             player_idx++;
         }
+        
         if (byes > 0) {
-            // Un bye = le p2 est vide, p1 gagne tout de suite
             byes--;
-            t->matches[i].p2 = 0;
+            t->matches[i].p2 = 0; // Pas d'adversaire
+            // Qualification automatique pour le tour suivant
             advance_winner(t, i, t->matches[i].p1, t->matches[i].p1_name);
         } else {
             if (player_idx < t->player_count) {
@@ -211,7 +221,7 @@ static void build_bracket(Tournament *t) {
         }
     }
 
-    // Lancer tous les matchs qui ont p1 et p2
+    // Lancement des matchs du 1er tour qui ont deux adversaires
     for (int i = 0; i < first_round_matches; i++) {
         if (t->matches[i].p1 != 0 && t->matches[i].p2 != 0 && t->matches[i].winner == 0) {
             send_start_room(t, i);
@@ -219,11 +229,13 @@ static void build_bracket(Tournament *t) {
     }
 }
 
+
 static void handle_create(PacketHeader *header, TournamentCreateReq *req) {
     for (int i = 0; i < MAX_TOURNAMENTS; i++) {
-        if (tournaments[i].active == 0) {
+        if (tournaments[i].active == 0) { // On cherche un emplacement libre
             tournaments[i].active = 1;
             tournaments[i].id = next_tourney_id++;
+            // Bornage du nombre de joueurs
             tournaments[i].max_players = req->max_players > MAX_T_PLAYERS ? MAX_T_PLAYERS : req->max_players;
             if (tournaments[i].max_players < 2) tournaments[i].max_players = 2;
             tournaments[i].player_count = 0;
@@ -231,11 +243,12 @@ static void handle_create(PacketHeader *header, TournamentCreateReq *req) {
             TournamentCreateResp resp;
             resp.tournament_id = tournaments[i].id;
             send_to_gateway(header->session_id, PACKET_TOURNAMENT_CREATE_RESP, &resp, sizeof(resp));
-            printf("[Tournament] Created %d (max %d)\n", tournaments[i].id, tournaments[i].max_players);
+            printf("[Tournament] Tournoi cree : ID=%d (Max=%d)\n", tournaments[i].id, tournaments[i].max_players);
             return;
         }
     }
 }
+
 
 static void handle_join(PacketHeader *header, TournamentJoinReq *req) {
     TournamentJoinResp resp;
@@ -245,6 +258,7 @@ static void handle_join(PacketHeader *header, TournamentJoinReq *req) {
         if (tournaments[i].id == req->tournament_id) {
             Tournament *t = &tournaments[i];
 
+            // On ne peut pas rejoindre un tournoi qui a déjà débuté
             if (t->active == 2) {
                 resp.status = 0;
                 strcpy(resp.message, "Le tournoi a deja commence.");
@@ -252,19 +266,18 @@ static void handle_join(PacketHeader *header, TournamentJoinReq *req) {
                 return;
             }
 
-            if (t->active != 1) {
-                continue;
-            }
+            if (t->active != 1) continue;
             
-            // Verifier duplicat
+            // Vérification des doublons
             for (int j = 0; j < t->player_count; j++) {
                 if (t->players[j].session_id == header->session_id) {
-                    resp.status = 1;
+                    resp.status = 1; // Déjà inscrit
                     send_to_gateway(header->session_id, PACKET_TOURNAMENT_JOIN_RESP, &resp, sizeof(resp));
                     return;
                 }
             }
 
+            // Vérification de la capacité
             if (t->player_count >= t->max_players) {
                 resp.status = 0;
                 strcpy(resp.message, "Tournoi plein.");
@@ -272,18 +285,20 @@ static void handle_join(PacketHeader *header, TournamentJoinReq *req) {
                 return;
             }
 
+            // Ajout du joueur
             t->players[t->player_count].session_id = header->session_id;
             strncpy(t->players[t->player_count].username, req->username, MAX_USERNAME_LEN - 1);
             t->player_count++;
 
             resp.status = 1;
             send_to_gateway(header->session_id, PACKET_TOURNAMENT_JOIN_RESP, &resp, sizeof(resp));
-            printf("[Tournament] Player %s joined %d (%d/%d)\n", req->username, t->id, t->player_count, t->max_players);
+            printf("[Tournament] Joueur %s a rejoint %d (%d/%d)\n", req->username, t->id, t->player_count, t->max_players);
 
             broadcast_tournament_state(t);
 
+            // Si le tournoi est plein, on lance le bracket
             if (t->player_count == t->max_players) {
-                t->active = 2; // running
+                t->active = 2;
                 build_bracket(t);
             }
             return;
@@ -291,16 +306,17 @@ static void handle_join(PacketHeader *header, TournamentJoinReq *req) {
     }
 
     resp.status = 0;
-    strcpy(resp.message, "Tournoi introuvable ou ferme.");
+    strcpy(resp.message, "Tournoi introuvable.");
     send_to_gateway(header->session_id, PACKET_TOURNAMENT_JOIN_RESP, &resp, sizeof(resp));
 }
+
 
 static void handle_list(PacketHeader *header) {
     TournamentListResp resp;
     memset(&resp, 0, sizeof(resp));
     
     for (int i = 0; i < MAX_TOURNAMENTS; i++) {
-        // Renvoie uniquement les tournois au statut "waiting" (active == 1)
+        // Seuls les tournois en attente sont affichés
         if (tournaments[i].active == 1 && resp.tournament_count < 10) {
             resp.tournaments[resp.tournament_count].tournament_id = tournaments[i].id;
             resp.tournaments[resp.tournament_count].player_count = (uint8_t)tournaments[i].player_count;
@@ -312,14 +328,18 @@ static void handle_list(PacketHeader *header) {
     send_to_gateway(header->session_id, PACKET_TOURNAMENT_LIST_RESP, &resp, sizeof(resp));
 }
 
+
 static void handle_game_finished(GameFinished *fin) {
     for (int i = 0; i < MAX_TOURNAMENTS; i++) {
+        // On ne regarde que les tournois en cours de compétition
         if (tournaments[i].id == fin->tournament_id && tournaments[i].active == 2) {
             Tournament *t = &tournaments[i];
-            // Trouver le match
+            
+            // Recherche du match spécifique dans le bracket
             for (int m = 0; m < t->num_matches; m++) {
                 TMatch *match = &t->matches[m];
                 if (match->started && match->winner == 0) {
+                    // Si l'un des joueurs du match correspond au gagnant signalé
                     if (match->p1 == fin->winner_session_id || match->p2 == fin->winner_session_id) {
                         const char* winner_name = (match->p1 == fin->winner_session_id) ? match->p1_name : match->p2_name;
                         advance_winner(t, m, fin->winner_session_id, winner_name);
@@ -331,19 +351,23 @@ static void handle_game_finished(GameFinished *fin) {
     }
 }
 
-int main(void) {
-    printf("[Tournament Worker] Demarrage...\n");
 
+int main(void) {
+    printf("[Tournament Worker] Demarrage de la boucle d'evenements...\n");
+
+    // Connexion à la file de messages globale
     global_mq = ipc_msg_get(ipc_get_key(GLOBAL_MSG_QUEUE_PATH, GLOBAL_MSG_QUEUE_ID));
     if (global_mq == -1) {
-        perror("ipc_msg_get failed");
+        perror("ipc_msg_get fail");
         exit(1);
     }
 
+    // Initialisation de la mémoire des tournois
     memset(tournaments, 0, sizeof(tournaments));
 
     char msg_buffer[MAX_MSG_SIZE];
     while (1) {
+        // Lecture bloquante des messages de type MSG_TYPE_TOURNAMENT
         int nbytes = ipc_msg_receive(global_mq, msg_buffer, sizeof(msg_buffer), MSG_TYPE_TOURNAMENT);
         if (nbytes <= 0) continue;
 
