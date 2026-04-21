@@ -45,7 +45,6 @@ static int find_room_index(uint32_t room_id) {
     return -1;
 }
 
-// Improved version: use PacketHeader to know who is who
 static void update_room_member(PacketHeader *header, void *payload) {
     uint32_t room_id = 0;
     if (header->type == PACKET_GAME_STARTED) {
@@ -62,7 +61,7 @@ static void update_room_member(PacketHeader *header, void *payload) {
             rooms[idx].room_id = room_id;
             if (gs->your_color == 0) {
                 rooms[idx].player_white = header->session_id;
-                strncpy(rooms[idx].white_name, "White", MAX_USERNAME_LEN-1); // Name not in GameStarted for self
+                strncpy(rooms[idx].white_name, "White", MAX_USERNAME_LEN-1);
                 rooms[idx].player_black = gs->opponent_session_id;
                 strncpy(rooms[idx].black_name, gs->opponent_username, MAX_USERNAME_LEN-1);
             } else {
@@ -88,11 +87,6 @@ static void update_room_member(PacketHeader *header, void *payload) {
 static void remove_session(uint32_t session_id) {
     for (int i = 0; i < MAX_ROOMS; i++) {
         if (!rooms[i].active) continue;
-        if (rooms[i].player_white == session_id || rooms[i].player_black == session_id) {
-            // Room closed if player leaves? For chat, let's just mark inactive if both gone or similar.
-            // Simplified: if a player leaves, we might as well keep it for remaining spectators, 
-            // but usually room closes.
-        }
         for (int j = 0; j < rooms[i].spectator_count; j++) {
             if (rooms[i].spectators[j].session_id == session_id) {
                 rooms[i].spectators[j] = rooms[i].spectators[rooms[i].spectator_count - 1];
@@ -126,9 +120,10 @@ static void handle_chat_msg(PacketHeader *header, ChatMessage *msg) {
     strncpy(bc.author_name, find_name(room, header->session_id), MAX_USERNAME_LEN - 1);
     strncpy(bc.message, msg->message, MAX_CHAT_MESSAGE_LEN - 1);
 
-    // Broadcast to all participants
-    if (room->player_white != 0) ipc_msg_send(global_mq, &bc, sizeof(bc), MSG_TYPE_GATEWAY);
-    // Note: session_id in header for broadcast needs to be target
+
+    if (room->player_white != 0) {
+        ipc_msg_send(global_mq, &bc, sizeof(bc), MSG_TYPE_GATEWAY);
+    }
     
     void send_to(uint32_t target_sid, ChatBroadcast *b) {
         char buf[MAX_MSG_SIZE];
@@ -145,8 +140,6 @@ static void handle_chat_msg(PacketHeader *header, ChatMessage *msg) {
     for (int i = 0; i < room->spectator_count; i++) {
         send_to(room->spectators[i].session_id, &bc);
     }
-    
-    printf("[Chat] Broadcast in room %u from %s: %s\n", room->room_id, bc.author_name, bc.message);
 }
 
 int main(void) {
